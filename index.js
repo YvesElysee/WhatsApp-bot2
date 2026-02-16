@@ -94,6 +94,10 @@ async function startBot() {
             connectionStatus = 'open'
             io.emit('status', 'open')
             qrCodeData = ''
+
+            // Notify Owner
+            const ownerNumber = global.owner[0] + '@s.whatsapp.net'
+            await sock.sendMessage(ownerNumber, { text: '🤖 Ely-bot est maintenant connecté et prêt !' })
         }
     })
 

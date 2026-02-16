@@ -1,12 +1,39 @@
 const { proto, getContentType } = require('@whiskeysockets/baileys')
 
-module.exports = async (sock, m, chatUpdate, store) => {
+module.exports = async (sock, m, chatUpdate) => {
     try {
-        var body = (m.mtype === 'conversation') ? m.message.conversation : (m.mtype == 'imageMessage') ? m.message.imageMessage.caption : (m.mtype == 'videoMessage') ? m.message.videoMessage.caption : (m.mtype == 'extendedTextMessage') ? m.message.extendedTextMessage.text : (m.mtype == 'buttonsResponseMessage') ? m.message.buttonsResponseMessage.selectedButtonId : (m.mtype == 'listResponseMessage') ? m.message.listResponseMessage.singleSelectReply.selectedRowId : (m.mtype == 'templateButtonReplyMessage') ? m.message.templateButtonReplyMessage.selectedId : (m.mtype === 'messageContextInfo') ? (m.message.buttonsResponseMessage?.selectedButtonId || m.message.listResponseMessage?.singleSelectReply.selectedRowId || m.text) : ''
-        var budy = (typeof m.text == 'string' ? m.text : '')
+        const fs = require('fs')
+        const path = require('path')
+        const commandsPath = path.join(__dirname, 'commands')
 
-        const type = getContentType(m.message)
-        const prefix = /^[\\/!#+.]/gi.test(body) ? body.match(/^[\\/!#+.]/gi)[0] : '/'  // Default prefix /
+        if (!m.message) return
+
+        // Handle different message types (Ephemeral, ViewOnce, etc.)
+        const msgType = getContentType(m.message)
+        const msgContent = (msgType === 'ephemeralMessage') ? m.message.ephemeralMessage.message : (msgType === 'viewOnceMessage') ? m.message.viewOnceMessage.message : m.message
+
+        // Re-calculate type based on unwrapped content
+        const type = getContentType(msgContent)
+
+        // Extract body text
+        var body = (type === 'conversation') ? msgContent.conversation :
+            (type === 'imageMessage') ? msgContent.imageMessage.caption :
+                (type === 'videoMessage') ? msgContent.videoMessage.caption :
+                    (type === 'extendedTextMessage') ? msgContent.extendedTextMessage.text :
+                        (type === 'buttonsResponseMessage') ? msgContent.buttonsResponseMessage.selectedButtonId :
+                            (type === 'listResponseMessage') ? msgContent.listResponseMessage.singleSelectReply.selectedRowId :
+                                (type === 'templateButtonReplyMessage') ? msgContent.templateButtonReplyMessage.selectedId : ''
+
+        // Handle Quoted Messages for commands
+        if (!body && type === 'messageContextInfo') {
+            body = msgContent.buttonsResponseMessage?.selectedButtonId || msgContent.listResponseMessage?.singleSelectReply.selectedRowId || ''
+        }
+
+        // Create m.text for legacy command support
+        m.text = body
+
+        // Default prefix handling - Allow no prefix for some cases or ensure it works
+        const prefix = /^[\\/!#+.]/gi.test(body) ? body.match(/^[\\/!#+.]/gi)[0] : '.'
         const isCmd = body.startsWith(prefix)
         const command = isCmd ? body.replace(prefix, '').trim().split(/ +/).shift().toLowerCase() : ''
         const args = body.trim().split(/ +/).slice(1)
@@ -29,18 +56,17 @@ module.exports = async (sock, m, chatUpdate, store) => {
         if (isCmd) {
             console.log(`[CMD] ${command} from ${senderNumber} in ${isGroup ? groupName : 'Private Chat'}`)
 
-            // Dynamic Command Handling
-            // We'll load commands from the 'commands' folder
-            // For now, let's implement the router logic in 'index.js' or here. 
-            // Better here.
+            // Ensure commands folder exists
+            // commandsPath already defined above if moved, or use distinct name
+            // Actually, looking at the file, I pasted the definition twice in previous turn.
+            // I will clean up the duplicates.
 
-            const fs = require('fs')
-            const path = require('path')
+            // Try enabling debug logger
+            // console.log(`Looking for command: ${command} in ${commandsPath}`)
 
-            const commandsPath = path.join(__dirname, 'commands')
-            // Read all files in commands folder
-            // Note: In production, caching commands is better than reading every time
+            // ... (rest of the loader logic)
 
+            // Check if command exists
             if (fs.existsSync(path.join(commandsPath, command + '.js'))) {
                 const cmd = require(path.join(commandsPath, command + '.js'))
                 // Execute command
