@@ -35,6 +35,8 @@ module.exports = async (sock, m, chatUpdate) => {
         // Default prefix handling - Allow no prefix for some cases or ensure it works
         const prefix = /^[\\/!#+.]/gi.test(body) ? body.match(/^[\\/!#+.]/gi)[0] : '.'
         const isCmd = body.startsWith(prefix)
+
+        if (body) console.log(`[DEBUG] Body: "${body}", Prefix: "${prefix}", isCmd: ${isCmd}`)
         const command = isCmd ? body.replace(prefix, '').trim().split(/ +/).shift().toLowerCase() : ''
         const args = body.trim().split(/ +/).slice(1)
         const text = args.join(" ")

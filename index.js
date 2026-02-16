@@ -90,14 +90,21 @@ async function startBot() {
                 startBot()
             }
         } else if (connection === 'open') {
-            console.log('Bot Connected to WhatsApp')
+            const botId = sock.user.id.split(':')[0]
+            console.log(`Bot Connected to WhatsApp as ${botId}`)
             connectionStatus = 'open'
             io.emit('status', 'open')
             qrCodeData = ''
 
             // Notify Owner
-            const ownerNumber = global.owner[0] + '@s.whatsapp.net'
-            await sock.sendMessage(ownerNumber, { text: '🤖 Ely-bot est maintenant connecté et prêt !' })
+            try {
+                const ownerNumber = global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
+                console.log(`Sending welcome message to owner: ${ownerNumber}`)
+                await sock.sendMessage(ownerNumber, { text: '🤖 Ely-bot est maintenant connecté et prêt !\n\nTapez `.menu` pour commencer.' })
+                console.log('Welcome message sent successfully.')
+            } catch (err) {
+                console.error('Failed to send welcome message to owner:', err)
+            }
         }
     })
 
@@ -118,42 +125,18 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds)
 
+    sock.public = true
+
     sock.ev.on('messages.upsert', async chatUpdate => {
         try {
             let m = chatUpdate.messages[0]
             if (!m.message) return
-            m.message = (Object.keys(m.message)[0] === 'ephemeralMessage') ? m.message.ephemeralMessage.message : m.message
+            const sender = m.key.remoteJid
+            console.log(`[MSG] New message from ${sender}`)
+
             if (m.key && m.key.remoteJid === 'status@broadcast') return
-            if (!sock.public && !m.key.fromMe && chatUpdate.type === 'notify') return
 
-            // Simple command handler
-            const msgContentType = getContentType(m.message)
-            const text = (msgContentType === 'conversation') ? m.message.conversation : (msgContentType === 'imageMessage') ? m.message.imageMessage.caption : (msgContentType === 'videoMessage') ? m.message.videoMessage.caption : (msgContentType === 'extendedTextMessage') ? m.message.extendedTextMessage.text : ''
-
-            const prefix = /^[\\/!#+.]/gi.test(text) ? text.match(/^[\\/!#+.]/gi)[0] : '.'
-            const isCmd = text.startsWith(prefix)
-            const command = isCmd ? text.replace(prefix, '').trim().split(' ')[0].toLowerCase() : ''
-            const args = text.trim().split(' ').slice(1)
-
-            if (isCmd) {
-                console.log(`Command detected: ${command}`)
-                try {
-                    // Start simplified dynamic command loader
-                    // This is a basic implementation. For production, use require dynamic path.
-                    const cmdFile = path.join(__dirname, 'commands', `${command}.js`)
-                    // Also check categories if needed, but for now flat
-                    // Better: loop through folders or map
-
-                    // Let's implement a simple router here for now or delegate
-                    // For the "tout maintenant" request, I'll put a router logic here.
-
-                    // We need to load commands first
-                } catch (e) {
-                    console.error(e)
-                }
-            }
-
-            // Pass to handler (we will create a handler file)
+            // Pass the raw message to the handler which handles unwrapping
             require('./handler')(sock, m, chatUpdate)
 
         } catch (err) {
