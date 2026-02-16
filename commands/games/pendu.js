@@ -1,28 +1,31 @@
 module.exports = {
     name: 'pendu',
-    run: async (sock, m, args, { reply, getGeminiModel }) => {
+    run: async (sock, m, args, { reply, getGeminiClient }) => {
         const from = m.key.remoteJid
         if (global.db.games[from]) return reply('❌ Une partie est déjà en cours !')
 
-        const model = getGeminiModel()
-        if (!model) return reply('⚠️ Erreur SDK.')
+        const client = getGeminiClient()
+        if (!client) return reply('⚠️ Erreur SDK.')
 
         reply('🎭 L\'IA prépare un Pendu Multijoueur...')
 
         try {
-            const prompt = "Génère un mot commun en français (4-10 lettres) et un indice. Réponds en JSON: {\"word\": \"...\", \"hint\": \"...\"}"
-            const result = await model.generateContent(prompt)
-            const data = JSON.parse(result.response.text().replace(/```json|```/g, '').trim())
+            const prompt = "Génère un seul mot commun en français (4-10 lettres) et un indice. Réponds en JSON: {\"word\": \"...\", \"hint\": \"...\"}"
+            const result = await client.models.generateContent({
+                model: 'gemini-1.5-flash',
+                contents: prompt
+            })
 
+            const data = JSON.parse(result.text.replace(/```json|```/g, '').trim())
             const word = data.word.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+
             const game = {
                 type: 'pendu',
                 word,
                 hint: data.hint,
                 display: word.split('').map(() => '_'),
                 attempts: 8,
-                used: [],
-                contributors: {}
+                used: []
             }
 
             const render = () => `🧩 *PENDU MULTIJOUEUR*\n\n💡 *Indice:* ${game.hint}\n\nMot: \`${game.display.join(' ')}\`\n❤️ Essais: ${game.attempts}\n🔠 Lettres: ${game.used.join(', ')}`
@@ -60,7 +63,7 @@ module.exports = {
             reply(render() + '\n\n👉 *Tout le monde peut participer !*')
         } catch (e) {
             console.error(e)
-            reply('❌ Erreur Pendu SDK.')
+            reply('❌ Erreur Pendu New SDK.')
         }
     }
 }

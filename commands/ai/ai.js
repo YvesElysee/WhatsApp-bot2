@@ -1,19 +1,21 @@
 module.exports = {
     name: 'ai',
     commands: ['ai', 'ely', 'gpt', 'gemini'],
-    run: async (sock, m, args, { reply, text, getGeminiModel }) => {
+    run: async (sock, m, args, { reply, text, getGeminiClient }) => {
         if (!text) return reply('🤖 Posez-moi une question !')
 
-        const model = getGeminiModel()
-        if (!model) return reply('⚠️ Clés Gemini manquantes sur Render (GEMINI_KEY_1/2/3).')
+        const client = getGeminiClient()
+        if (!client) return reply('⚠️ Clés Gemini manquantes sur Render (GEMINI_KEY_1/2/3).')
 
         try {
-            const result = await model.generateContent(text)
-            const response = await result.response
-            reply(`✨ *Ely AI (Gemini SDK)*:\n\n${response.text()}`)
+            const result = await client.models.generateContent({
+                model: 'gemini-1.5-flash',
+                contents: text
+            })
+            reply(`✨ *Ely AI (New SDK)*:\n\n${result.text}`)
         } catch (e) {
             console.error(e)
-            reply('❌ Erreur de l\'IA SDK. Vérifiez vos clés ou le quota.')
+            reply('❌ Erreur de l\'IA (SDK @google/genai). Vérifiez vos clés.')
         }
     }
 }

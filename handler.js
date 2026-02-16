@@ -1,7 +1,7 @@
 const { getContentType } = require('@whiskeysockets/baileys')
 const fs = require('fs')
 const path = require('path')
-const { GoogleGenerativeAI } = require('@google/generative-ai')
+const { GoogleGenAI } = require('@google/genai')
 
 const commands = new Map()
 const commandsPath = path.join(__dirname, 'commands')
@@ -38,26 +38,19 @@ const loadCommands = (dir = commandsPath) => {
 loadCommands()
 console.log(`[ELY-SYSTEM] ${commands.size} commandes indexées.`)
 
-// Gemini SDK Rotation Helper
-const getGeminiModel = (modelName = 'gemini-1.5-flash') => {
+// Gemini SDK Rotation Helper (@google/genai)
+const getGeminiClient = () => {
     const keys = [
         process.env.GEMINI_KEY_1,
         process.env.GEMINI_KEY_2,
         process.env.GEMINI_KEY_3
     ].filter(k => k && k.length > 10)
 
-    if (keys.length === 0) {
-        // Fallback to legacy key if present
-        const legacyKey = process.env.GEMINI_API_KEY
-        if (!legacyKey) return null
-        const genAI = new GoogleGenerativeAI(legacyKey)
-        return genAI.getGenerativeModel({ model: modelName })
-    }
+    let key = keys.length > 0 ? keys[global.db.geminiIndex % keys.length] : process.env.GEMINI_API_KEY
+    if (!key) return null
 
-    const key = keys[global.db.geminiIndex % keys.length]
     global.db.geminiIndex++
-    const genAI = new GoogleGenerativeAI(key)
-    return genAI.getGenerativeModel({ model: modelName })
+    return new GoogleGenAI({ apiKey: key })
 }
 
 module.exports = async (sock, m, chatUpdate) => {
@@ -121,12 +114,10 @@ module.exports = async (sock, m, chatUpdate) => {
 
         // --- Strict Prefix Filter ---
         if (!isCmd) {
-            // Listeners for active games
             if (global.db.games[from]) {
                 const game = global.db.games[from]
                 if (game.listener) await game.listener(sock, m, { body: m.text, sender, reply: (text) => sock.sendMessage(from, { text }, { quoted: m }) })
             }
-            // Auto-reaction
             if (global.db.settings.autoreact && m.text && !m.key.fromMe) {
                 const emojis = ['👍', '❤️', '🔥', '😂', '✨']
                 await sock.sendMessage(from, { react: { text: emojis[Math.floor(Math.random() * emojis.length)], key: m.key } })
@@ -141,14 +132,12 @@ module.exports = async (sock, m, chatUpdate) => {
 
         // --- Admin Detection ---
         let isAdmins = false
-        let isBotAdmins = false
         if (isGroup) {
             const groupMetadata = await sock.groupMetadata(from).catch(() => null)
             if (groupMetadata) {
                 const participants = groupMetadata.participants || []
                 const admins = participants.filter(v => v.admin !== null).map(v => sock.decodeJid(v.id))
                 isAdmins = admins.includes(sender) || isOwner
-                isBotAdmins = admins.includes(botNumber)
             }
         }
 
@@ -158,7 +147,7 @@ module.exports = async (sock, m, chatUpdate) => {
             console.log(`[EXEC] .${command} by ${sender.split('@')[0]}`)
             await cmd.run(sock, m, args, {
                 reply: (t) => sock.sendMessage(from, { text: t }, { quoted: m }),
-                text, isAdmins, isBotAdmins, isGroup, commands, isOwner, getGeminiModel
+                text, isAdmins, isGroup, commands, isOwner, getGeminiClient
             })
         }
 
