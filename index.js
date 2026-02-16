@@ -42,6 +42,18 @@ io.on('connection', (socket) => {
 
 const usePairingCode = process.env.PAIRING_NUMBER || ''
 
+// Global Database & Settings
+global.db = {
+    games: {},
+    settings: {
+        antidelete: false,
+        autoreact: false,
+        privateMode: false,
+        ibOnly: false
+    },
+    msgStore: new Map() // Cache for Anti-delete
+}
+
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('session')
     const { version, isLatest } = await fetchLatestBaileysVersion()

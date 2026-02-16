@@ -37,10 +37,6 @@ const loadCommands = (dir = commandsPath) => {
 loadCommands()
 console.log(`[ELY-SYSTEM] ${commands.size} commandes indexées.`)
 
-// Database for Games & State
-if (!global.db) global.db = {}
-if (!global.db.games) global.db.games = {}
-
 module.exports = async (sock, m, chatUpdate) => {
     try {
         if (!m.message) return
@@ -59,6 +55,44 @@ module.exports = async (sock, m, chatUpdate) => {
 
         const type = getContentType(msgContent)
 
+        // --- Anti-Delete Integration ---
+        const from = m.key.remoteJid
+        const isGroup = from.endsWith('@g.us')
+        const botNumber = sock.decodeJid(sock.user.id)
+        const sender = sock.decodeJid(m.key.participant || m.key.remoteJid)
+        const isOwner = global.owner.includes(sender.split('@')[0]) || m.key.fromMe
+
+        // Cache message for anti-delete
+        if (type && type !== 'protocolMessage' && !m.key.fromMe) {
+            global.db.msgStore.set(m.key.id, {
+                m,
+                msgContent,
+                type,
+                sender,
+                from
+            })
+            // Limit cache size
+            if (global.db.msgStore.size > 500) {
+                const firstKey = global.db.msgStore.keys().next().value
+                global.db.msgStore.delete(firstKey)
+            }
+        }
+
+        // Handle Deleted Message
+        if (type === 'protocolMessage' && msgContent.protocolMessage.type === 0) {
+            const deletedKey = msgContent.protocolMessage.key
+            const cached = global.db.msgStore.get(deletedKey.id)
+
+            if (cached && global.db.settings.antidelete) {
+                const { m: oldM, msgContent: oldContent, type: oldType, sender: oldSender } = cached
+                await sock.sendMessage(from, { text: `🚨 *ANTI-DELETE* 🚨\n\n👤 *Utilisateur:* @${oldSender.split('@')[0]}\n📝 *Message supprimé ci-dessous :*`, mentions: [oldSender] }, { quoted: oldM })
+                await sock.copyNForward(from, oldM, true)
+            }
+        }
+
+        // --- Private Mode Check ---
+        if (global.db.settings.privateMode && isGroup && !isOwner) return
+
         // --- Body Extraction ---
         let body = (type === 'conversation') ? msgContent.conversation :
             (type === 'imageMessage') ? msgContent.imageMessage.caption :
@@ -72,22 +106,22 @@ module.exports = async (sock, m, chatUpdate) => {
             body = msgContent.buttonsResponseMessage?.selectedButtonId || msgContent.listResponseMessage?.singleSelectReply.selectedRowId || ''
         }
 
-        // --- Metadata ---
-        const from = m.key.remoteJid
-        const sender = sock.decodeJid(m.key.participant || m.key.remoteJid)
-        const botNumber = sock.decodeJid(sock.user.id)
-
-        m.text = body.trim()
+        m.text = (body || '').trim()
         const cleanBody = m.text
         const prefix = /^[\\/!#+.]/gi.test(cleanBody) ? cleanBody.match(/^[\\/!#+.]/gi)[0] : '.'
         const isCmd = cleanBody.startsWith(prefix)
 
-        const isGroup = from.endsWith('@g.us')
+        // --- Auto-Reaction ---
+        if (global.db.settings.autoreact && !isCmd && body && !m.key.fromMe) {
+            const emojis = ['👍', '❤️', '🔥', '😂', '😮', '🙌', '✨']
+            const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)]
+            await sock.sendMessage(from, { react: { text: randomEmoji, key: m.key } })
+        }
+
+        // --- Metadata for Commands ---
         const groupMetadata = isGroup ? await sock.groupMetadata(from).catch(() => null) : null
         const participants = isGroup ? (groupMetadata?.participants || []) : []
         const groupAdmins = isGroup ? participants.filter(v => v.admin !== null).map(v => v.id) : []
-
-        // Fix: Use decodeJid for robust comparison
         const isAdmins = isGroup ? groupAdmins.includes(sender) : false
         const isBotAdmins = isGroup ? groupAdmins.includes(botNumber) : false
 
@@ -103,13 +137,13 @@ module.exports = async (sock, m, chatUpdate) => {
 
             const cmd = commands.get(command)
             if (cmd) {
-                console.log(`[CMD] ${command} from ${sender.split('@')[0]}`)
-                await cmd.run(sock, m, args, { reply, text, isAdmins, isBotAdmins, isGroup, commands })
+                console.log(`[EXEC] ${command} from ${sender.split('@')[0]}`)
+                await cmd.run(sock, m, args, { reply, text, isAdmins, isBotAdmins, isGroup, commands, isOwner })
             }
         }
 
-        // --- Non-Prefix Game Listeners ---
-        if (global.db.games[from]) {
+        // --- Games Listener ---
+        if (global.db.games && global.db.games[from]) {
             const game = global.db.games[from]
             if (game.listener) {
                 await game.listener(sock, m, { body: cleanBody, sender, reply })

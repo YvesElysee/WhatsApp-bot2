@@ -3,19 +3,24 @@ module.exports = {
     run: async (sock, m, args, { reply }) => {
         const menu = `
 ╔══════════════════╗
-║     *🤖 ELY-BOT*     ║
+║     *🤖 ELY-BOT* ║
 ╚══════════════════╝
 
 👋 Bienvenue sur Ely-bot !
 
 🛠 *OUTILS*
-▸ .ping, .list, .pp, .extract
+▸ .ping, .list, .pp, .extract, .tts
+
+⚙ *REGLAGES*
+▸ .antidelete [on/off]
+▸ .autoreact [on/off]
+▸ .mode [public/private]
 
 👑 *ADMIN*
 ▸ .kick, .promote, .demote, .hidetag
 
 🧠 *IA*
-▸ .ai, .gemini, .translate
+▸ .ai, .gemini, .translate, .stt
 
 🎮 *JEUX*
 ▸ .quiz, .devine, .guess, .morpion, .pendu
