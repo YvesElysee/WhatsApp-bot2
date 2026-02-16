@@ -48,6 +48,14 @@ async function startBot() {
         browser: ['Ubuntu', 'Chrome', '20.0.04'],
     })
 
+    sock.decodeJid = (jid) => {
+        if (!jid) return jid
+        if (/:\d+@/gi.test(jid)) {
+            let decode = jidDecode(jid) || {}
+            return decode.user && decode.server && decode.user + '@' + decode.server || jid
+        } else return jid
+    }
+
 
 
 

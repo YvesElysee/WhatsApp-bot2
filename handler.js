@@ -30,18 +30,19 @@ module.exports = async (sock, m, chatUpdate) => {
         }
 
         // Create m.text for legacy command support
-        m.text = body
+        m.text = body.trim().replace(/^[^\w\.\!\#\+\/\\]+/, '')
+        const cleanBody = m.text
 
-        // Default prefix handling - Allow no prefix for some cases or ensure it works
-        const prefix = /^[\\/!#+.]/gi.test(body) ? body.match(/^[\\/!#+.]/gi)[0] : '.'
-        const isCmd = body.startsWith(prefix)
+        // Default prefix handling
+        const prefix = /^[\\/!#+.]/gi.test(cleanBody) ? cleanBody.match(/^[\\/!#+.]/gi)[0] : '.'
+        const isCmd = cleanBody.startsWith(prefix)
 
-        if (body) console.log(`[DEBUG] Body: "${body}", Prefix: "${prefix}", isCmd: ${isCmd}`)
-        const command = isCmd ? body.replace(prefix, '').trim().split(/ +/).shift().toLowerCase() : ''
-        const args = body.trim().split(/ +/).slice(1)
+        if (cleanBody) console.log(`[DEBUG] CleanBody: "${cleanBody}", Prefix: "${prefix}", isCmd: ${isCmd}`)
+        const command = isCmd ? cleanBody.replace(prefix, '').trim().split(/ +/).shift().toLowerCase() : ''
+        const args = cleanBody.trim().split(/ +/).slice(1)
         const text = args.join(" ")
         const sender = m.key.fromMe ? (sock.user.id.split(':')[0] + '@s.whatsapp.net' || sock.user.id) : (m.key.participant || m.key.remoteJid)
-        const botNumber = await sock.decodeJid(sock.user.id)
+        const botNumber = sock.decodeJid(sock.user.id)
         const senderNumber = sender.split('@')[0]
         const isGroup = m.key.remoteJid.endsWith('@g.us')
         const groupMetadata = isGroup ? await sock.groupMetadata(m.key.remoteJid).catch(e => { }) : ''
