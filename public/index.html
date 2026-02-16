@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ely-bot Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Ely-bot 🤖</h1>
+            <div id="status" class="status disconnected">Déconnecté</div>
+        </header>
+
+        <main>
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('qr')">QR Code</button>
+                <button class="tab-btn" onclick="switchTab('code')">Code de Connexion</button>
+            </div>
+
+            <div id="qr-panel" class="panel active">
+                <div class="qr-container">
+                    <img id="qr-image" src="" alt="En attente du QR Code..." style="display: none;">
+                    <p id="qr-text">En attente du QR Code...</p>
+                </div>
+            </div>
+
+            <div id="code-panel" class="panel">
+                <div class="form-group">
+                    <label for="phone">Numéro de téléphone (Format: 237xxxxxxxxx)</label>
+                    <input type="text" id="phone" placeholder="Ex: 237699999999">
+                    <button id="get-code-btn" onclick="requestPairing()">Obtenir le Code</button>
+                </div>
+                <div id="pairing-code-display" class="code-display" style="display: none;">
+                    <span id="pairing-code"></span>
+                </div>
+            </div>
+        </main>
+        
+        <div id="logs" class="logs">
+            <h3>Logs</h3>
+            <div id="log-content"></div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="client.js"></script>
+</body>
+</html>

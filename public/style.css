@@ -1,0 +1,144 @@
+:root {
+    --bg: #1a1a1a;
+    --card: #2d2d2d;
+    --text: #ffffff;
+    --primary: #25D366; /* WhatsApp Green */
+    --accent: #34B7F1;
+    --error: #ff4d4d;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+
+.container {
+    width: 90%;
+    max-width: 500px;
+    background: var(--card);
+    padding: 2rem;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.status {
+    padding: 5px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+.status.connected { background: var(--primary); color: #000; }
+.status.disconnected { background: var(--error); color: #fff; }
+
+.tabs {
+    display: flex;
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid #444;
+}
+
+.tab-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    color: #888;
+    padding: 10px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: 0.3s;
+}
+
+.tab-btn.active {
+    color: var(--primary);
+    border-bottom: 2px solid var(--primary);
+    margin-bottom: -2px;
+}
+
+.panel { display: none; text-align: center; }
+.panel.active { display: block; }
+
+.qr-container {
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    display: inline-block;
+    min-height: 200px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+}
+
+#qr-image {
+    max-width: 100%;
+    height: auto;
+}
+
+#qr-text { color: #333; }
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+input {
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background: #333;
+    color: #fff;
+    font-size: 1rem;
+}
+
+button#get-code-btn {
+    padding: 12px;
+    background: var(--primary);
+    color: #000;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 1rem;
+}
+
+.code-display {
+    margin-top: 20px;
+    padding: 15px;
+    background: #333;
+    border-radius: 8px;
+    font-family: monospace;
+    font-size: 2rem;
+    letter-spacing: 5px;
+    color: var(--accent);
+}
+
+.logs {
+    margin-top: 2rem;
+    border-top: 1px solid #444;
+    padding-top: 1rem;
+}
+
+#log-content {
+    background: #111;
+    padding: 10px;
+    height: 100px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.8rem;
+    border-radius: 4px;
+    text-align: left;
+}

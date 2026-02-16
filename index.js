@@ -4,13 +4,34 @@ const pino = require('pino')
 const fs = require('fs')
 const path = require('path')
 const { Boom } = require('@hapi/boom')
-const express = require('express')
 const app = express()
+const server = require('http').createServer(app)
+const io = require('socket.io')(server)
+const QRCode = require('qrcode')
 const port = process.env.PORT || 3000
 
-// Quick Keep-Alive for Render
-app.get('/', (req, res) => res.send('Ely-bot is running!'))
-app.listen(port, '0.0.0.0', () => console.log(`Server listening on port ${port}`))
+app.use(express.static(path.join(__dirname, 'public')))
+// Keep-alive/Health check
+app.get('/health', (req, res) => res.send('Ely-bot is running!'))
+
+server.listen(port, '0.0.0.0', () => console.log(`Server listening on port ${port}`))
+
+let qrCodeData = ''
+let connectionStatus = 'close'
+
+io.on('connection', (socket) => {
+    socket.emit('status', connectionStatus)
+    if (qrCodeData && connectionStatus !== 'open') socket.emit('qr', qrCodeData)
+
+    socket.on('request-pairing', async (phone) => {
+        // Logic handled in startBot via global/event or direct reference if possible
+        // For simplicity, we'll emit an event that startBot listens to, 
+        // or just set a global var that startBot checks (less clean)
+        // Better: Use an event emitter structure or pass socket logic to startBot.
+        // We will attach an event listener to the global process or a custom emitter
+        process.emit('request-pairing', phone, socket)
+    })
+})
 
 const usePairingCode = process.env.PAIRING_NUMBER || ''
 
@@ -21,25 +42,26 @@ async function startBot() {
     const sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: !usePairingCode,
+        printQRInTerminal: false,
         auth: state,
         browser: ['Ubuntu', 'Chrome', '20.0.04'],
     })
 
 
 
-    if (usePairingCode && !sock.authState.creds.registered) {
-        const phoneNumber = usePairingCode.replace(/[^0-9]/g, '')
-        setTimeout(async () => {
-            let code = await sock.requestPairingCode(phoneNumber)
-            code = code?.match(/.{1,4}/g)?.join('-') || code
-            console.log(`\n\nYour Pairing Code: ${code}\n\n`)
-        }, 3000)
-    }
+
 
     sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update
+        const { connection, lastDisconnect, qr } = update
+
+        if (qr) {
+            qrCodeData = await QRCode.toDataURL(qr)
+            io.emit('qr', qrCodeData)
+        }
+
         if (connection === 'close') {
+            connectionStatus = 'close'
+            io.emit('status', 'close')
             let reason = new Boom(lastDisconnect?.error)?.output.statusCode
             if (reason === DisconnectReason.badSession) {
                 console.log('Bad Session File, Please Delete Session and Scan Again')
@@ -68,6 +90,24 @@ async function startBot() {
             }
         } else if (connection === 'open') {
             console.log('Bot Connected to WhatsApp')
+            connectionStatus = 'open'
+            io.emit('status', 'open')
+            qrCodeData = ''
+        }
+    })
+
+    // Pairing Code Request Handler
+    process.on('request-pairing', async (phone, socket) => {
+        if (!sock.authState.creds.registered) {
+            try {
+                let code = await sock.requestPairingCode(phone)
+                code = code?.match(/.{1,4}/g)?.join('-') || code
+                socket.emit('pairing-code', code)
+            } catch (e) {
+                socket.emit('log', 'Erreur demande code: ' + e.message)
+            }
+        } else {
+            socket.emit('log', 'Déjà connecté !')
         }
     })
 
