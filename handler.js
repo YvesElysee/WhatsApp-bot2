@@ -1,23 +1,49 @@
-const { proto, getContentType } = require('@whiskeysockets/baileys')
+const { getContentType } = require('@whiskeysockets/baileys')
 const fs = require('fs')
 const path = require('path')
 
+const commands = new Map()
+const commandsPath = path.join(__dirname, 'commands')
+
+// Cache commands for lower latency
+const loadCommands = () => {
+    try {
+        if (!fs.existsSync(commandsPath)) return
+        const files = fs.readdirSync(commandsPath)
+        for (let file of files) {
+            if (file.endsWith('.js')) {
+                const cmdModule = require(path.join(commandsPath, file))
+                // Handle complex command modules (multiple commands per file)
+                if (cmdModule.commands && Array.isArray(cmdModule.commands)) {
+                    for (let cmdName of cmdModule.commands) {
+                        commands.set(cmdName, cmdModule)
+                    }
+                }
+                // Handle simple command modules (name equals filename or specified)
+                else {
+                    const name = cmdModule.name || file.replace('.js', '')
+                    commands.set(name, cmdModule)
+                }
+            }
+        }
+        console.log(`[ELY-SYSTEM] ${commands.size} commandes chargées avec succès.`)
+    } catch (e) {
+        console.error('[ELY-ERROR] Échec du chargement des commandes:', e)
+    }
+}
+
+loadCommands()
+
 module.exports = async (sock, m, chatUpdate) => {
     try {
-        const fs = require('fs')
-        const path = require('path')
-        const commandsPath = path.join(__dirname, 'commands')
-
         if (!m.message) return
 
-        // Handle different message types (Ephemeral, ViewOnce, etc.)
+        // Message Unwrapping
         const msgType = getContentType(m.message)
-        const msgContent = (msgType === 'ephemeralMessage') ? m.message.ephemeralMessage.message : (msgType === 'viewOnceMessage') ? m.message.viewOnceMessage.message : m.message
-
-        // Re-calculate type based on unwrapped content
+        const msgContent = (msgType === 'ephemeralMessage') ? m.message.ephemeralMessage.message : (msgType === 'viewOnceMessage') ? m.message.viewOnceMessage.message.imageMessage || m.message.viewOnceMessage.message.videoMessage : m.message
         const type = getContentType(msgContent)
 
-        // Extract body text
+        // Body Extraction
         var body = (type === 'conversation') ? msgContent.conversation :
             (type === 'imageMessage') ? msgContent.imageMessage.caption :
                 (type === 'videoMessage') ? msgContent.videoMessage.caption :
@@ -26,78 +52,45 @@ module.exports = async (sock, m, chatUpdate) => {
                             (type === 'listResponseMessage') ? msgContent.listResponseMessage.singleSelectReply.selectedRowId :
                                 (type === 'templateButtonReplyMessage') ? msgContent.templateButtonReplyMessage.selectedId : ''
 
-        // Handle Quoted Messages for commands
         if (!body && type === 'messageContextInfo') {
             body = msgContent.buttonsResponseMessage?.selectedButtonId || msgContent.listResponseMessage?.singleSelectReply.selectedRowId || ''
         }
+        if (!body) return
 
-        // Create m.text for legacy command support
+        // Command detection logic
         m.text = body.trim().replace(/^[^\w\.\!\#\+\/\\]+/, '')
         const cleanBody = m.text
-
-        // Default prefix handling
         const prefix = /^[\\/!#+.]/gi.test(cleanBody) ? cleanBody.match(/^[\\/!#+.]/gi)[0] : '.'
         const isCmd = cleanBody.startsWith(prefix)
 
-        if (cleanBody) console.log(`[DEBUG] CleanBody: "${cleanBody}", Prefix: "${prefix}", isCmd: ${isCmd}`)
-        const command = isCmd ? cleanBody.replace(prefix, '').trim().split(/ +/).shift().toLowerCase() : ''
+        if (!isCmd) return
+
+        const command = cleanBody.replace(prefix, '').trim().split(/ +/).shift().toLowerCase()
         const args = cleanBody.trim().split(/ +/).slice(1)
         const text = args.join(" ")
+
+        // Metadata
         const sender = m.key.fromMe ? (sock.user.id.split(':')[0] + '@s.whatsapp.net' || sock.user.id) : (m.key.participant || m.key.remoteJid)
         const botNumber = sock.decodeJid(sock.user.id)
-        const senderNumber = sender.split('@')[0]
         const isGroup = m.key.remoteJid.endsWith('@g.us')
-        const groupMetadata = isGroup ? await sock.groupMetadata(m.key.remoteJid).catch(e => { }) : ''
-        const groupName = isGroup ? groupMetadata.subject : ''
-        const participants = isGroup ? await groupMetadata.participants : ''
-        const groupAdmins = isGroup ? await participants.filter(v => v.admin !== null).map(v => v.id) : ''
+        const groupMetadata = isGroup ? await sock.groupMetadata(m.key.remoteJid).catch(e => { }) : null
+        const participants = isGroup ? (groupMetadata?.participants || []) : []
+        const groupAdmins = isGroup ? participants.filter(v => v.admin !== null).map(v => v.id) : []
         const isBotAdmins = isGroup ? groupAdmins.includes(botNumber) : false
         const isAdmins = isGroup ? groupAdmins.includes(sender) : false
 
-        const reply = (text) => {
-            sock.sendMessage(m.key.remoteJid, { text: text }, { quoted: m })
+        const reply = (resText) => {
+            sock.sendMessage(m.key.remoteJid, { text: resText }, { quoted: m })
         }
 
-        if (isCmd) {
-            console.log(`[CMD] ${command} from ${senderNumber} in ${isGroup ? groupName : 'Private Chat'}`)
-
-            // Ensure commands folder exists
-            // commandsPath already defined above if moved, or use distinct name
-            // Actually, looking at the file, I pasted the definition twice in previous turn.
-            // I will clean up the duplicates.
-
-            // Try enabling debug logger
-            // console.log(`Looking for command: ${command} in ${commandsPath}`)
-
-            // ... (rest of the loader logic)
-
-            // Check if command exists
-            if (fs.existsSync(path.join(commandsPath, command + '.js'))) {
-                const cmd = require(path.join(commandsPath, command + '.js'))
-                // Execute command
-                cmd.run(sock, m, args, {
-                    reply, text, isAdmins, isBotAdmins, isGroup
-                })
-            } else if (fs.existsSync(path.join(commandsPath, 'features.js'))) {
-                // Or we scan all files and check metadata (better for organization)
-                // Keeping it simple: 1 file = 1 commandname for now unless needed
-            }
-
-            // Fallback for features that need to scan specific categories or multiple commands per file
-            // Let's implement a smarter loader:
-            const files = fs.readdirSync(commandsPath)
-            for (let file of files) {
-                if (file.endsWith('.js')) {
-                    const cmdModule = require(path.join(commandsPath, file))
-                    if (cmdModule.commands && cmdModule.commands.includes(command)) {
-                        cmdModule.run(sock, m, args, { reply, text, isAdmins, isBotAdmins, isGroup })
-                        return; // Executed
-                    }
-                }
-            }
+        // Logic
+        const cmd = commands.get(command)
+        if (cmd) {
+            console.log(`[EXEC] ${command} | Sender: ${sender.split('@')[0]} | Group: ${isGroup}`)
+            await cmd.run(sock, m, args, { reply, text, isAdmins, isBotAdmins, isGroup })
         }
 
     } catch (e) {
-        console.error(e)
+        console.error('[HANDLER ERROR]', e)
     }
 }

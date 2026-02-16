@@ -13,8 +13,9 @@ module.exports = {
 
             // Check for API Key
             const apiKey = config.OPENAI_API_KEY
-            if (!apiKey || apiKey.startsWith('sk-proj-...')) {
-                return reply(`⚠️ *Configuration Requise* ⚠️\n\nPour que l'IA fonctionne, vous devez ajouter une clé API OpenAI.\n1. Allez sur https://platform.openai.com/api-keys\n2. Copiez votre clé (sk-...)\n3. Collez-la dans le fichier 'config.js' ou dans '.env' sous le nom OPENAI_API_KEY.\n\nEn attendant, voici une réponse simulée : "Je suis Ely-bot, mais mon cerveau n'est pas encore connecté !"`)
+            if (!apiKey || apiKey === 'sk-proj-...' || apiKey.length < 10) {
+                console.log(`[WARN] Invalid OpenAI API Key detected: ${apiKey ? (apiKey.substring(0, 7) + '...') : 'NULL'}`)
+                return reply(`⚠️ *Clé API Manquante* ⚠️\n\nLe bot ne trouve pas votre clé OpenAI.\n\n**Sur Render :**\n1. Allez dans *Environment*.\n2. Ajoutez \`OPENAI_API_KEY\` avec votre clé.\n3. Cliquez sur *Save Changes*.\n\nLe bot redémarrera automatiquement. En attendant, utilisez \`.gemini\` !`)
             }
 
             try {

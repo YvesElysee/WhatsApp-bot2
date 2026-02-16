@@ -21,7 +21,7 @@ module.exports = {
 ▸ .extract : _Sauver média (ViewOnce)_
 ▸ .translate : _Traduire du texte_
 
-*-- 🧠 IA (CERVEAU) --*
+*-- 🧠 IA  --*
 ▸ .ai : _Demander à GPT-3.5_
 ▸ .gemini : _Demander à Gemini Pro_
 
@@ -38,7 +38,7 @@ module.exports = {
 *-- 👑 ADMIN --*
 ▸ .admin : _Gestion du groupe_
 
-_Propulsé par Ely & Gemini_
+_Propulsé par Elysée_
             `
             await reply(menu.trim())
         }

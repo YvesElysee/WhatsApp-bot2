@@ -10,7 +10,7 @@ global.author = 'Ely'
 
 module.exports = {
     SESSION_ID: process.env.SESSION_ID || 'session',
-    OPENAI_API_KEY: process.env.OPENAI_API_KEY || 'sk-proj-...' // PUT YOUR KEY HERE OR IN .env
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY || process.env.API_KEY || 'sk-proj-...' // Supports both common names
 }
 
 let file = require.resolve(__filename)

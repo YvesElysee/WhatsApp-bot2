@@ -14,10 +14,10 @@ module.exports = {
 ▸ .guess : _Devinement de nombre_
 ▸ .truth : _Vérité_
 ▸ .dare : _Défi_
-▸ .quiz : _Quiz Culture (IA)_
-▸ .devine : _Devinette (IA)_
+▸ .quiz : _Quiz Culture_
+▸ .devine : _Devinette_
 
-_Amusez-vous bien avec Ely!_
+_Amusez-vous bien avec Ely-Game!_
             `
             await reply(menu.trim())
         }
