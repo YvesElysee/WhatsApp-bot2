@@ -11,33 +11,29 @@ module.exports = {
             await reply(`Response Time: ${end - start}ms`)
         } else if (command === 'help' || command === 'menu') {
             const menu = `
-*WhatsApp Bot Help Menu*
+*🌟 Ely-bot Help Menu 🌟*
 
 *General*
-- .ping : Check bot speed
-- .help : Show this menu
-- .pp : Get profile picture
+- .ping : Vérifier la vitesse
+- .help : Afficher ce menu
+- .pp : Photo de profil
 
-*Media*
-- .sticker : Convert image/video to sticker
-- .play [query] : Play song from YouTube
-- .chipmunk : Apply voice effect (reply to audio)
-- .extract : Save view-once media (auto)
+*🎮 Jeux*
+- .games : Menu des jeux (Truth, Dare, Guess)
 
-*AI & Fun*
-- .ai [query] : Ask AI
-- .truth : Truth or Dare (Truth)
-- .dare : Truth or Dare (Dare)
-- .translate [lang] [text] : Translate text
+*🤖 IA & Fun*
+- .ai [question] : Poser une question à Ely (IA)
+- .translate [lang] [text] : Traduire
 
-*Admin*
-- .kick @user
-- .add @user
-- .promote @user
-- .demote @user
-- .hidetag [text]
+*🎵 Média*
+- .sticker : Créer un sticker
+- .play [titre] : Jouer une musique
+- .chipmunk : Effet voix de chipmunk
 
-_Created by Antigravity_
+*👑 Admin*
+- .admin : Menu administrateur
+
+_Développé avec ❤️ par Ely_
             `
             // Send image with caption if you want, but text is fine for now
             await reply(menu.trim())

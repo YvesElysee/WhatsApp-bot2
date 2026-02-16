@@ -9,8 +9,8 @@ const app = express()
 const port = process.env.PORT || 3000
 
 // Quick Keep-Alive for Render
-app.get('/', (req, res) => res.send('Bot is running!'))
-app.listen(port, () => console.log(`Server listening on port ${port}`))
+app.get('/', (req, res) => res.send('Ely-bot is running!'))
+app.listen(port, '0.0.0.0', () => console.log(`Server listening on port ${port}`))
 
 const usePairingCode = process.env.PAIRING_NUMBER || ''
 const store = makeInMemoryStore({ logger: pino().child({ level: 'silent', stream: 'store' }) })

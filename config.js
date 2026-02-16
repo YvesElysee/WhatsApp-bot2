@@ -1,15 +1,16 @@
+require('dotenv').config()
 const fs = require('fs')
 const path = require('path')
 
-global.owner = ['237999999999'] // Put your number here
+global.owner = ['237697353272'] // Put your number here
 global.mods = []
 global.prems = []
-global.packname = 'WhatsApp Bot'
-global.author = 'Bot'
+global.packname = 'Ely-bot'
+global.author = 'Ely'
 
 module.exports = {
     SESSION_ID: process.env.SESSION_ID || 'session',
-    // Add other config variables here
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY || 'sk-proj-...' // PUT YOUR KEY HERE OR IN .env
 }
 
 let file = require.resolve(__filename)

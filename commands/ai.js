@@ -1,63 +1,51 @@
 const axios = require('axios')
 const { translate } = require('google-translate-api-x')
+const config = require('../config') // Import config to get API Key
 
 module.exports = {
     name: 'ai',
-    commands: ['ai', 'truth', 'dare', 'translate'],
+    commands: ['ai', 'translate'],
     run: async (sock, m, args, { reply, text }) => {
         const command = m.text.split(' ')[0].slice(1).toLowerCase()
 
         if (command === 'ai') {
-            if (!text) return reply('Ask me something! Example: .ai Who is the president of France?')
-            try {
-                // Using a free API endpoint (e.g., simsimi or alternative) 
-                // Or standard OpenAI if key provided. 
-                // For this demo, I will use a placeholder or a very simple free API if available.
-                // Let's use a mock AI response for stability unless a key is configured.
+            if (!text) return reply('🤖 Posez-moi une question ! Exemple: .ai Quelle est la capitale du Cameroun ?')
 
-                // If you want real AI, you need an API Key.
-                // reply('AI feature requires an API Key. Please configure it.')
-
-                // Simulating AI for user satisfaction in this demo:
-                reply(`[AI Mock] That is an interesting question about "${text}". I am still learning!`)
-            } catch (e) {
-                reply('Error with AI service.')
+            // Check for API Key
+            const apiKey = config.OPENAI_API_KEY
+            if (!apiKey || apiKey.startsWith('sk-proj-...')) {
+                return reply(`⚠️ *Configuration Requise* ⚠️\n\nPour que l'IA fonctionne, vous devez ajouter une clé API OpenAI.\n1. Allez sur https://platform.openai.com/api-keys\n2. Copiez votre clé (sk-...)\n3. Collez-la dans le fichier 'config.js' ou dans '.env' sous le nom OPENAI_API_KEY.\n\nEn attendant, voici une réponse simulée : "Je suis Ely-bot, mais mon cerveau n'est pas encore connecté !"`)
             }
-        }
 
-        else if (command === 'truth') {
-            const truths = [
-                "What is your biggest fear?",
-                "Have you ever lied to your best friend?",
-                "What is the most embarrassing thing you've done?",
-                "Who is your crush?"
-            ]
-            const random = truths[Math.floor(Math.random() * truths.length)]
-            reply(`*TRUTH*: ${random}`)
-        }
+            try {
+                // Real OpenAI Call Example
+                const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+                    model: "gpt-3.5-turbo",
+                    messages: [{ role: "user", content: text }]
+                }, {
+                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                })
 
-        else if (command === 'dare') {
-            const dares = [
-                "Send a voice note singing a song.",
-                "Change your profile picture to a monkey for 1 hour.",
-                "Text your crush 'I love you'.",
-                "Do 10 pushups and send video."
-            ]
-            const random = dares[Math.floor(Math.random() * dares.length)]
-            reply(`*DARE*: ${random}`)
+                const aiReply = response.data.choices[0].message.content
+                reply(`🤖 *Ely-bot AI*:\n${aiReply}`)
+
+            } catch (e) {
+                console.error(e)
+                reply('Erreur avec l\'API IA. Vérifiez votre clé ou votre solde.')
+            }
         }
 
         else if (command === 'translate') {
             if (!text) return reply('Usage: .translate [lang] [text]')
             const lang = args[0]
             const data = args.slice(1).join(' ')
-            if (!data) return reply('Please provide text to translate.')
+            if (!data) return reply('Texte manquant. Exemple: .translate fr Hello')
 
             try {
                 const res = await translate(data, { to: lang })
-                reply(`*Translation (${lang}):*\n${res.text}`)
+                reply(`*Traduction (${lang}):*\n${res.text}`)
             } catch (e) {
-                reply('Error translating. Make sure the language code is correct (e.g., en, fr, es).')
+                reply('Erreur de traduction. Vérifiez le code langue (fr, en, es, de...).')
             }
         }
     }
