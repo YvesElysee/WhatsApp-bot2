@@ -1,43 +1,41 @@
-const axios = require('axios')
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys')
 
 module.exports = {
     name: 'stt',
-    run: async (sock, m, args, { reply }) => {
+    run: async (sock, m, args, { reply, getGeminiModel }) => {
         const quoted = m.quoted ? m.quoted : m
         const mime = (quoted.msg || quoted).mimetype || ''
 
         if (!/audio/.test(mime)) return reply('❌ Répondez à un message vocal pour le transcrire !')
 
-        const geminiKey = process.env.GEMINI_API_KEY
-        if (!geminiKey) return reply('⚠️ Clé Gemini manquante. La transcription utilise Gemini.')
+        const model = getGeminiModel('gemini-1.5-flash')
+        if (!model) return reply('⚠️ Clé Gemini manquante.')
 
-        reply('🎙️ Transcription en cours (IA)...')
+        reply('🎙️ Transcription en cours (SDK AI)...')
 
         try {
             const stream = await downloadContentFromMessage(quoted.msg || quoted, 'audio')
             let buffer = Buffer.from([])
             for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]) }
 
-            const base64Audio = buffer.toString('base64')
+            const result = await model.generateContent([
+                "Transcris cet audio en texte français. Ne renvoie que le texte.",
+                {
+                    inlineData: {
+                        mimeType: "audio/ogg; codecs=opus",
+                        data: buffer.toString('base64')
+                    }
+                }
+            ])
+            const response = await result.response
+            const transcription = response.text()
 
-            // Using Gemini to transcribe (Gemini 1.5 Pro/Flash supports audio)
-            const response = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
-                contents: [{
-                    parts: [
-                        { text: "Transcris cet audio en texte français. Ne renvoie que le texte." },
-                        { inline_data: { mime_type: "audio/ogg", data: base64Audio } }
-                    ]
-                }]
-            })
-
-            const transcription = response.data.choices?.[0]?.message?.content || response.data.candidates?.[0]?.content?.parts?.[0]?.text
             if (!transcription) throw new Error('Transcription vide')
 
             reply(`📝 *TRANSCRIPTION* :\n\n${transcription.trim()}`)
         } catch (e) {
             console.error(e)
-            reply('❌ Échec de la transcription. Assurez-vous d\'avoir une clé Gemini valide et active.')
+            reply('❌ Échec de la transcription via SDK.')
         }
     }
 }

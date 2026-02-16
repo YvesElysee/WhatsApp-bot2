@@ -4,6 +4,6 @@ module.exports = {
         const start = Date.now()
         await reply('Pong! 🏓')
         const end = Date.now()
-        reply(`Vitesse: ${end - start}ms`)
+        reply(`Latence: ${end - start}ms`)
     }
 }

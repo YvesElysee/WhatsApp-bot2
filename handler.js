@@ -1,6 +1,7 @@
 const { getContentType } = require('@whiskeysockets/baileys')
 const fs = require('fs')
 const path = require('path')
+const { GoogleGenerativeAI } = require('@google/generative-ai')
 
 const commands = new Map()
 const commandsPath = path.join(__dirname, 'commands')
@@ -37,56 +38,68 @@ const loadCommands = (dir = commandsPath) => {
 loadCommands()
 console.log(`[ELY-SYSTEM] ${commands.size} commandes indexées.`)
 
+// Gemini SDK Rotation Helper
+const getGeminiModel = (modelName = 'gemini-1.5-flash') => {
+    const keys = [
+        process.env.GEMINI_KEY_1,
+        process.env.GEMINI_KEY_2,
+        process.env.GEMINI_KEY_3
+    ].filter(k => k && k.length > 10)
+
+    if (keys.length === 0) {
+        // Fallback to legacy key if present
+        const legacyKey = process.env.GEMINI_API_KEY
+        if (!legacyKey) return null
+        const genAI = new GoogleGenerativeAI(legacyKey)
+        return genAI.getGenerativeModel({ model: modelName })
+    }
+
+    const key = keys[global.db.geminiIndex % keys.length]
+    global.db.geminiIndex++
+    const genAI = new GoogleGenerativeAI(key)
+    return genAI.getGenerativeModel({ model: modelName })
+}
+
 module.exports = async (sock, m, chatUpdate) => {
     try {
         if (!m.message) return
 
-        // --- Message Unwrapping ---
-        const msgType = getContentType(m.message)
-        let msgContent = m.message
+        // --- Robust Message Unwrapping ---
+        let msg = m.message
+        let msgType = getContentType(msg)
 
         if (msgType === 'ephemeralMessage') {
-            msgContent = m.message.ephemeralMessage.message
-        } else if (msgType === 'viewOnceMessageV2') {
-            msgContent = m.message.viewOnceMessageV2.message
+            msg = msg.ephemeralMessage.message
+            msgType = getContentType(msg)
+        }
+        if (msgType === 'viewOnceMessageV2') {
+            msg = msg.viewOnceMessageV2.message
+            msgType = getContentType(msg)
         } else if (msgType === 'viewOnceMessage') {
-            msgContent = m.message.viewOnceMessage.message
+            msg = msg.viewOnceMessage.message
+            msgType = getContentType(msg)
         }
 
-        const type = getContentType(msgContent)
+        m.unwrapped = { msg, type: msgType }
 
-        // --- Anti-Delete Integration ---
+        // --- Metadata ---
         const from = m.key.remoteJid
         const isGroup = from.endsWith('@g.us')
-        const botNumber = sock.decodeJid(sock.user.id)
         const sender = sock.decodeJid(m.key.participant || m.key.remoteJid)
+        const botNumber = sock.decodeJid(sock.user.id)
         const isOwner = global.owner.includes(sender.split('@')[0]) || m.key.fromMe
 
-        // Cache message for anti-delete
-        if (type && type !== 'protocolMessage' && !m.key.fromMe) {
-            global.db.msgStore.set(m.key.id, {
-                m,
-                msgContent,
-                type,
-                sender,
-                from
-            })
-            // Limit cache size
-            if (global.db.msgStore.size > 500) {
-                const firstKey = global.db.msgStore.keys().next().value
-                global.db.msgStore.delete(firstKey)
-            }
+        // --- Anti-Delete ---
+        if (msgType && msgType !== 'protocolMessage' && !m.key.fromMe) {
+            global.db.msgStore.set(m.key.id, { m, msg, type: msgType, sender, from })
+            if (global.db.msgStore.size > 500) global.db.msgStore.delete(global.db.msgStore.keys().next().value)
         }
 
-        // Handle Deleted Message
-        if (type === 'protocolMessage' && msgContent.protocolMessage.type === 0) {
-            const deletedKey = msgContent.protocolMessage.key
-            const cached = global.db.msgStore.get(deletedKey.id)
-
+        if (msgType === 'protocolMessage' && msg.protocolMessage.type === 0) {
+            const cached = global.db.msgStore.get(msg.protocolMessage.key.id)
             if (cached && global.db.settings.antidelete) {
-                const { m: oldM, msgContent: oldContent, type: oldType, sender: oldSender } = cached
-                await sock.sendMessage(from, { text: `🚨 *ANTI-DELETE* 🚨\n\n👤 *Utilisateur:* @${oldSender.split('@')[0]}\n📝 *Message supprimé ci-dessous :*`, mentions: [oldSender] }, { quoted: oldM })
-                await sock.copyNForward(from, oldM, true)
+                await sock.sendMessage(from, { text: `🚨 *ANTI-DELETE* 🚨\n\n👤 @${cached.sender.split('@')[0]}\n📝 Message supprimé ci-dessous :`, mentions: [cached.sender] }, { quoted: cached.m })
+                await sock.copyNForward(from, cached.m, true)
             }
         }
 
@@ -94,63 +107,62 @@ module.exports = async (sock, m, chatUpdate) => {
         if (global.db.settings.privateMode && isGroup && !isOwner) return
 
         // --- Body Extraction ---
-        let body = (type === 'conversation') ? msgContent.conversation :
-            (type === 'imageMessage') ? msgContent.imageMessage.caption :
-                (type === 'videoMessage') ? msgContent.videoMessage.caption :
-                    (type === 'extendedTextMessage') ? msgContent.extendedTextMessage.text :
-                        (type === 'buttonsResponseMessage') ? msgContent.buttonsResponseMessage.selectedButtonId :
-                            (type === 'listResponseMessage') ? msgContent.listResponseMessage.singleSelectReply.selectedRowId :
-                                (type === 'templateButtonReplyMessage') ? msgContent.templateButtonReplyMessage.selectedId : ''
-
-        if (!body && type === 'messageContextInfo') {
-            body = msgContent.buttonsResponseMessage?.selectedButtonId || msgContent.listResponseMessage?.singleSelectReply.selectedRowId || ''
-        }
+        let body = (msgType === 'conversation') ? msg.conversation :
+            (msgType === 'imageMessage') ? msg.imageMessage.caption :
+                (msgType === 'videoMessage') ? msg.videoMessage.caption :
+                    (msgType === 'extendedTextMessage') ? msg.extendedTextMessage.text :
+                        (msgType === 'buttonsResponseMessage') ? msg.buttonsResponseMessage.selectedButtonId :
+                            (msgType === 'listResponseMessage') ? msg.listResponseMessage.singleSelectReply.selectedRowId :
+                                (msgType === 'templateButtonReplyMessage') ? msg.templateButtonReplyMessage.selectedId : ''
 
         m.text = (body || '').trim()
-        const cleanBody = m.text
-        const prefix = /^[\\/!#+.]/gi.test(cleanBody) ? cleanBody.match(/^[\\/!#+.]/gi)[0] : '.'
-        const isCmd = cleanBody.startsWith(prefix)
+        const prefix = '.'
+        const isCmd = m.text.startsWith(prefix)
 
-        // --- Auto-Reaction ---
-        if (global.db.settings.autoreact && !isCmd && body && !m.key.fromMe) {
-            const emojis = ['👍', '❤️', '🔥', '😂', '😮', '🙌', '✨']
-            const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)]
-            await sock.sendMessage(from, { react: { text: randomEmoji, key: m.key } })
+        // --- Strict Prefix Filter ---
+        if (!isCmd) {
+            // Listeners for active games
+            if (global.db.games[from]) {
+                const game = global.db.games[from]
+                if (game.listener) await game.listener(sock, m, { body: m.text, sender, reply: (text) => sock.sendMessage(from, { text }, { quoted: m }) })
+            }
+            // Auto-reaction
+            if (global.db.settings.autoreact && m.text && !m.key.fromMe) {
+                const emojis = ['👍', '❤️', '🔥', '😂', '✨']
+                await sock.sendMessage(from, { react: { text: emojis[Math.floor(Math.random() * emojis.length)], key: m.key } })
+            }
+            return
         }
 
-        // --- Metadata for Commands ---
-        const groupMetadata = isGroup ? await sock.groupMetadata(from).catch(() => null) : null
-        const participants = isGroup ? (groupMetadata?.participants || []) : []
-        const groupAdmins = isGroup ? participants.filter(v => v.admin !== null).map(v => v.id) : []
-        const isAdmins = isGroup ? groupAdmins.includes(sender) : false
-        const isBotAdmins = isGroup ? groupAdmins.includes(botNumber) : false
+        // --- Command Setup ---
+        const command = m.text.slice(1).trim().split(/ +/).shift().toLowerCase()
+        const args = m.text.trim().split(/ +/).slice(1)
+        const text = args.join(" ")
 
-        const reply = (text) => {
-            sock.sendMessage(from, { text: text }, { quoted: m })
-        }
-
-        // --- Command Execution ---
-        if (isCmd) {
-            const command = cleanBody.replace(prefix, '').trim().split(/ +/).shift().toLowerCase()
-            const args = cleanBody.trim().split(/ +/).slice(1)
-            const text = args.join(" ")
-
-            const cmd = commands.get(command)
-            if (cmd) {
-                console.log(`[EXEC] ${command} from ${sender.split('@')[0]}`)
-                await cmd.run(sock, m, args, { reply, text, isAdmins, isBotAdmins, isGroup, commands, isOwner })
+        // --- Admin Detection ---
+        let isAdmins = false
+        let isBotAdmins = false
+        if (isGroup) {
+            const groupMetadata = await sock.groupMetadata(from).catch(() => null)
+            if (groupMetadata) {
+                const participants = groupMetadata.participants || []
+                const admins = participants.filter(v => v.admin !== null).map(v => sock.decodeJid(v.id))
+                isAdmins = admins.includes(sender) || isOwner
+                isBotAdmins = admins.includes(botNumber)
             }
         }
 
-        // --- Games Listener ---
-        if (global.db.games && global.db.games[from]) {
-            const game = global.db.games[from]
-            if (game.listener) {
-                await game.listener(sock, m, { body: cleanBody, sender, reply })
-            }
+        // --- Execute Command ---
+        const cmd = commands.get(command)
+        if (cmd) {
+            console.log(`[EXEC] .${command} by ${sender.split('@')[0]}`)
+            await cmd.run(sock, m, args, {
+                reply: (t) => sock.sendMessage(from, { text: t }, { quoted: m }),
+                text, isAdmins, isBotAdmins, isGroup, commands, isOwner, getGeminiModel
+            })
         }
 
     } catch (e) {
-        console.error('[HANDLER ERROR]', e)
+        console.error('[ELY-HANDLER ERROR]', e)
     }
 }

@@ -1,32 +1,19 @@
-const axios = require('axios')
-const config = require('../../config')
-
 module.exports = {
     name: 'ai',
-    run: async (sock, m, args, { reply, text }) => {
+    commands: ['ai', 'ely', 'gpt', 'gemini'],
+    run: async (sock, m, args, { reply, text, getGeminiModel }) => {
         if (!text) return reply('🤖 Posez-moi une question !')
-        const apiKey = config.OPENAI_API_KEY
 
-        if (!apiKey || apiKey === 'sk-proj-...' || apiKey.length < 10) {
-            return reply('⚠️ Clé OpenAI manquante ou invalide. Configurez `OPENAI_API_KEY` sur Render.')
-        }
+        const model = getGeminiModel()
+        if (!model) return reply('⚠️ Clés Gemini manquantes sur Render (GEMINI_KEY_1/2/3).')
 
         try {
-            const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-                model: "gpt-3.5-turbo",
-                messages: [{ role: "user", content: text }]
-            }, {
-                headers: { 'Authorization': `Bearer ${apiKey}` }
-            })
-
-            reply(`🤖 *IA GPT*:\n\n${response.data.choices[0].message.content}`)
+            const result = await model.generateContent(text)
+            const response = await result.response
+            reply(`✨ *Ely AI (Gemini SDK)*:\n\n${response.text()}`)
         } catch (e) {
             console.error(e)
-            if (e.response && e.response.status === 429) {
-                reply('⚠️ Limite OpenAI atteinte (429). Utilisez `.gemini` !')
-            } else {
-                reply('❌ Erreur OpenAI. Vérifiez votre solde.')
-            }
+            reply('❌ Erreur de l\'IA SDK. Vérifiez vos clés ou le quota.')
         }
     }
 }

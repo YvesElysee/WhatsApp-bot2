@@ -51,8 +51,19 @@ global.db = {
         privateMode: false,
         ibOnly: false
     },
-    msgStore: new Map() // Cache for Anti-delete
+    msgStore: new Map(),
+    geminiIndex: 0
 }
+
+// Aggressive Self-Ping (Anti-Sleep)
+const axios = require('axios')
+setInterval(() => {
+    const url = process.env.RENDER_URL
+    if (url) {
+        axios.get(url).catch(() => { })
+        console.log('[ELY-PING] Aggressive keep-alive ping sent.')
+    }
+}, 5000)
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('session')
