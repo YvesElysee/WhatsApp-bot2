@@ -1,5 +1,5 @@
 require('./config')
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore, jidDecode, proto, getContentType } = require('@whiskeysockets/baileys')
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, jidDecode, proto, getContentType } = require('@whiskeysockets/baileys')
 const pino = require('pino')
 const fs = require('fs')
 const path = require('path')
@@ -13,7 +13,6 @@ app.get('/', (req, res) => res.send('Ely-bot is running!'))
 app.listen(port, '0.0.0.0', () => console.log(`Server listening on port ${port}`))
 
 const usePairingCode = process.env.PAIRING_NUMBER || ''
-const store = makeInMemoryStore({ logger: pino().child({ level: 'silent', stream: 'store' }) })
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('session')
@@ -27,7 +26,7 @@ async function startBot() {
         browser: ['Ubuntu', 'Chrome', '20.0.04'],
     })
 
-    store.bind(sock.ev)
+
 
     if (usePairingCode && !sock.authState.creds.registered) {
         const phoneNumber = usePairingCode.replace(/[^0-9]/g, '')
@@ -110,7 +109,7 @@ async function startBot() {
             }
 
             // Pass to handler (we will create a handler file)
-            require('./handler')(sock, m, chatUpdate, store)
+            require('./handler')(sock, m, chatUpdate)
 
         } catch (err) {
             console.log(err)
