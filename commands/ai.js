@@ -4,7 +4,7 @@ const config = require('../config') // Import config to get API Key
 
 module.exports = {
     name: 'ai',
-    commands: ['ai', 'translate'],
+    commands: ['ai', 'gemini', 'translate'],
     run: async (sock, m, args, { reply, text }) => {
         const command = m.text.split(' ')[0].slice(1).toLowerCase()
 
@@ -27,11 +27,33 @@ module.exports = {
                 })
 
                 const aiReply = response.data.choices[0].message.content
-                reply(`🤖 *Ely-bot AI*:\n${aiReply}`)
+                reply(`🤖 *Ely-bot AI (GPT)*:\n${aiReply}`)
 
             } catch (e) {
                 console.error(e)
-                reply('Erreur avec l\'API IA. Vérifiez votre clé ou votre solde.')
+                if (e.response && e.response.status === 429) {
+                    reply('⚠️ *Limite atteinte (OpenAI 429)*: Trop de requêtes ou crédit épuisé. Essayez d\'utiliser Gemini si configuré.')
+                } else {
+                    reply('Erreur avec l\'API OpenAI. Vérifiez votre clé ou votre solde.')
+                }
+            }
+        }
+
+        else if (command === 'gemini') {
+            if (!text) return reply('🤖 Posez-moi une question ! Exemple: .gemini Qui est Steve Jobs ?')
+            const geminiKey = process.env.GEMINI_API_KEY
+            if (!geminiKey) return reply('⚠️ Clé GEMINI_API_KEY manquante dans le .env.')
+
+            try {
+                reply('💭 Réflexion...')
+                const response = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${geminiKey}`, {
+                    contents: [{ parts: [{ text: text }] }]
+                })
+                const geminiReply = response.data.candidates[0].content.parts[0].text
+                reply(`✨ *Ely-bot AI (Gemini)*:\n${geminiReply}`)
+            } catch (e) {
+                console.error(e)
+                reply('Erreur avec l\'API Gemini.')
             }
         }
 

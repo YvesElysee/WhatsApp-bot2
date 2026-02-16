@@ -1,4 +1,6 @@
 const { proto, getContentType } = require('@whiskeysockets/baileys')
+const fs = require('fs')
+const path = require('path')
 
 module.exports = async (sock, m, chatUpdate) => {
     try {

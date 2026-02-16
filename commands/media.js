@@ -12,13 +12,36 @@ try { ytdl = require('@distube/ytdl-core') } catch (e) { console.log('ytdl not f
 
 module.exports = {
     name: 'media',
-    commands: ['sticker', 's', 'play', 'chipmunk', 'pp'],
+    commands: ['sticker', 's', 'play', 'chipmunk', 'pp', 'extract'],
     run: async (sock, m, args, { reply, text, isGroup }) => {
         const command = m.text.split(' ')[0].slice(1).toLowerCase()
         const quoted = m.quoted ? m.quoted : m
         const mime = (quoted.msg || quoted).mimetype || ''
 
-        if (command === 'sticker' || command === 's') {
+        if (command === 'extract') {
+            if (!m.quoted) return reply('Répondez à un message ViewOnce (Vue Unique) !')
+            reply('Extraction du média en cours... 🔄')
+            try {
+                const stream = await downloadContentFromMessage(quoted.msg || quoted, mime.split('/')[0])
+                let buffer = Buffer.from([])
+                for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]) }
+
+                if (/image/.test(mime)) {
+                    await sock.sendMessage(m.key.remoteJid, { image: buffer, caption: 'Extrait par Ely-bot ✨' }, { quoted: m })
+                } else if (/video/.test(mime)) {
+                    await sock.sendMessage(m.key.remoteJid, { video: buffer, caption: 'Extrait par Ely-bot ✨' }, { quoted: m })
+                } else if (/audio/.test(mime)) {
+                    await sock.sendMessage(m.key.remoteJid, { audio: buffer, mimetype: mime }, { quoted: m })
+                } else {
+                    reply('Type de média non supporté.')
+                }
+            } catch (e) {
+                console.error(e)
+                reply('Erreur lors de l\'extraction. Le média a peut-être déjà expiré ou n\'est pas accessible.')
+            }
+        }
+
+        else if (command === 'sticker' || command === 's') {
             if (/image|video|webp/.test(mime)) {
                 reply('Creating sticker...')
                 // This requires ffmpeg. 

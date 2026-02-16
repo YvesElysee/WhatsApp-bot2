@@ -3,6 +3,12 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLat
 const pino = require('pino')
 const fs = require('fs')
 const path = require('path')
+
+// Ensure temp directory exists
+const tempDir = path.join(__dirname, 'temp')
+if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true })
+}
 const { Boom } = require('@hapi/boom')
 const express = require('express')
 const app = express()

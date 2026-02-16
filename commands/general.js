@@ -11,31 +11,35 @@ module.exports = {
             await reply(`Response Time: ${end - start}ms`)
         } else if (command === 'help' || command === 'menu') {
             const menu = `
-*🌟 Ely-bot Help Menu 🌟*
+╔══════════════════╗
+║     *🤖 ELY-BOT*     ║
+╚══════════════════╝
 
-*General*
-- .ping : Vérifier la vitesse
-- .help : Afficher ce menu
-- .pp : Photo de profil
+*-- 🛠️ UTILS --*
+▸ .ping : _Vitesse du bot_
+▸ .pp : _Choper la photo d'un profil_
+▸ .extract : _Sauver média (ViewOnce)_
+▸ .translate : _Traduire du texte_
 
-*🎮 Jeux*
-- .games : Menu des jeux (Truth, Dare, Guess)
+*-- 🧠 IA (CERVEAU) --*
+▸ .ai : _Demander à GPT-3.5_
+▸ .gemini : _Demander à Gemini Pro_
 
-*🤖 IA & Fun*
-- .ai [question] : Poser une question à Ely (IA)
-- .translate [lang] [text] : Traduire
+*-- 🎬 MÉDIA --*
+▸ .sticker : _Image/Vidéo -> Sticker_
+▸ .play : _Jouer une musique YouTube_
+▸ .chipmunk : _Effet voix d'écureuil_
 
-*🎵 Média*
-- .sticker : Créer un sticker
-- .play [titre] : Jouer une musique
-- .chipmunk : Effet voix de chipmunk
+*-- 🎮 JEUX --*
+▸ .games : _Menu des mini-jeux_
+▸ .quiz : _Tester votre culture_
+▸ .devine : _Deviner le nombre_
 
-*👑 Admin*
-- .admin : Menu administrateur
+*-- 👑 ADMIN --*
+▸ .admin : _Gestion du groupe_
 
-_Développé avec ❤️ par Ely_
+_Propulsé par Ely & Gemini_
             `
-            // Send image with caption if you want, but text is fine for now
             await reply(menu.trim())
         }
     }
