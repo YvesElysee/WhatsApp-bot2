@@ -10,12 +10,26 @@ module.exports = {
         try {
             const result = await client.models.generateContent({
                 model: 'gemini-1.5-flash',
-                contents: text
+                contents: [{ role: 'user', parts: [{ text }] }]
             })
-            reply(`✨ *Ely AI (SDK Officiel)*:\n\n${result.text}`)
+
+            // Extract text correctly from @google/genai response
+            const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || result.text || 'Désolé, je n\'ai pas pu générer de réponse.'
+            reply(`✨ *Ely AI*:\n\n${responseText}`)
         } catch (e) {
             console.error(e)
-            reply('❌ Erreur de l\'IA (SDK @google/genai). Vérifiez vos clés sur Render.')
+            // Fallback attempt with gemini-pro if flash fails
+            try {
+                const result = await client.models.generateContent({
+                    model: 'gemini-pro',
+                    contents: [{ role: 'user', parts: [{ text }] }]
+                })
+                const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || result.text || 'Désolé, je n\'ai pas pu générer de réponse.'
+                reply(`✨ *Ely AI (Fallback)*:\n\n${responseText}`)
+            } catch (err2) {
+                console.error('Fallback failed:', err2)
+                reply('❌ Erreur de l\'IA. Vérifiez vos clés API dans le fichier .env et assurez-vous qu\'elles sont valides pour Gemini 1.5 Flash.')
+            }
         }
     }
 }
