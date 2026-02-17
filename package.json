@@ -33,7 +33,6 @@
     "yt-search": "^2.13.1"
   },
   "overrides": {
-    "whatwg-encoding": "^3.1.1",
-    "request": "axios"
+    "uuid": "^9.0.0"
   }
 }
