@@ -134,12 +134,14 @@ module.exports = async (sock, m, chatUpdate) => {
         const args = m.text.trim().split(/ +/).slice(1)
         const text = args.join(" ")
 
-        // --- Admin Detection ---
+        // --- Admin & Owner Detection ---
         let isAdmins = false
+        let groupOwner = ''
         if (isGroup) {
             const groupMetadata = await sock.groupMetadata(from).catch(() => null)
             if (groupMetadata) {
                 const participants = groupMetadata.participants || []
+                groupOwner = groupMetadata.owner || participants.find(p => p.admin === 'superadmin')?.id || ''
                 const admins = participants.filter(v => v.admin !== null).map(v => sock.decodeJid(v.id))
                 isAdmins = admins.includes(sender) || isOwner
             }
@@ -148,10 +150,29 @@ module.exports = async (sock, m, chatUpdate) => {
         // --- Execute Command ---
         const cmd = commands.get(command)
         if (cmd) {
+            // Protection Logic: Identify targeted user
+            const quoted = m.quoted ? m.quoted : m
+            const targetJid = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
+
+            if (targetJid) {
+                const decodedTarget = sock.decodeJid(targetJid)
+                const isTargetOwner = global.owner.includes(decodedTarget.split('@')[0])
+                const isTargetGroupOwner = decodedTarget === groupOwner
+
+                // List of commands that shouldn't touch the owner
+                const restrictedCommands = ['pp', 'info', 'sticker', 'kick', 'promote', 'demote']
+                if (restrictedCommands.includes(command) && (isTargetOwner || isTargetGroupOwner) && !m.key.fromMe) {
+                    return sock.sendMessage(from, { text: '❌ Action interdite contre le propriétaire du bot ou du groupe.' }, { quoted: m })
+                }
+            }
+
             console.log(`[EXEC] .${command} by ${sender.split('@')[0]}`)
             await cmd.run(sock, m, args, {
                 reply: (t) => sock.sendMessage(from, { text: t }, { quoted: m }),
-                text, isAdmins, isGroup, commands, isOwner, getGeminiClient
+                text, isAdmins, isGroup, commands, isOwner, getGeminiClient, groupOwner
+            }).catch(e => {
+                console.error(`[CMD ERROR] ${command}:`, e)
+                sock.sendMessage(from, { text: `❌ Erreur lors de l'exécution de .${command}` }, { quoted: m })
             })
         }
 
