@@ -12,10 +12,10 @@ module.exports = {
                 model: 'gemini-1.5-flash',
                 contents: text
             })
-            reply(`✨ *Ely AI (New SDK)*:\n\n${result.text}`)
+            reply(`✨ *Ely AI (SDK Officiel)*:\n\n${result.text}`)
         } catch (e) {
             console.error(e)
-            reply('❌ Erreur de l\'IA (SDK @google/genai). Vérifiez vos clés.')
+            reply('❌ Erreur de l\'IA (SDK @google/genai). Vérifiez vos clés sur Render.')
         }
     }
 }

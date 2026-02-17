@@ -6,7 +6,7 @@ const { GoogleGenAI } = require('@google/genai')
 const commands = new Map()
 const commandsPath = path.join(__dirname, 'commands')
 
-// Recursive Command Loader
+// Recursive Command Loader with error safety
 const loadCommands = (dir = commandsPath) => {
     try {
         if (!fs.existsSync(dir)) return
@@ -18,20 +18,24 @@ const loadCommands = (dir = commandsPath) => {
             if (stat.isDirectory()) {
                 loadCommands(fullPath)
             } else if (file.endsWith('.js')) {
-                delete require.cache[require.resolve(fullPath)]
-                const cmdModule = require(fullPath)
-                if (cmdModule.commands && Array.isArray(cmdModule.commands)) {
-                    for (let cmdName of cmdModule.commands) {
-                        commands.set(cmdName, cmdModule)
+                try {
+                    delete require.cache[require.resolve(fullPath)]
+                    const cmdModule = require(fullPath)
+                    if (cmdModule.commands && Array.isArray(cmdModule.commands)) {
+                        for (let cmdName of cmdModule.commands) {
+                            commands.set(cmdName, cmdModule)
+                        }
+                    } else {
+                        const name = cmdModule.name || file.replace('.js', '')
+                        commands.set(name, cmdModule)
                     }
-                } else {
-                    const name = cmdModule.name || file.replace('.js', '')
-                    commands.set(name, cmdModule)
+                } catch (err) {
+                    console.error(`[ELY-ERROR] Failed to load command ${file}:`, err)
                 }
             }
         }
     } catch (e) {
-        console.error('[ELY-ERROR] Failed to load commands:', e)
+        console.error('[ELY-ERROR] Failed to scan commands directory:', e)
     }
 }
 
