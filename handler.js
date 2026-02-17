@@ -95,8 +95,19 @@ module.exports = async (sock, m, chatUpdate) => {
         if (msgType === 'protocolMessage' && msg.protocolMessage.type === 0) {
             const cached = global.db.msgStore.get(msg.protocolMessage.key.id)
             if (cached && global.db.settings.antidelete) {
-                await sock.sendMessage(from, { text: `🚨 *ANTI-DELETE* 🚨\n\n👤 @${cached.sender.split('@')[0]}\n📝 Message supprimé ci-dessous :`, mentions: [cached.sender] }, { quoted: cached.m })
+                const ownerNumber = global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
+                const notificationText = `🚨 *ANTI-DELETE* 🚨\n\n👤 @${cached.sender.split('@')[0]}\n📝 Message supprimé ci-dessous :`
+
+                // Envoi de la notification
+                await sock.sendMessage(from, { text: notificationText, mentions: [cached.sender] }, { quoted: cached.m })
+                // Redirection du message original
                 await sock.copyNForward(from, cached.m, true)
+
+                // Optionnel: Envoyer aussi à l'owner si c'est important
+                if (from !== ownerNumber) {
+                    await sock.sendMessage(ownerNumber, { text: `🚨 *ANTI-DELETE (Audit)* 🚨\n\n📍 Groupe/Chat: ${from}\n👤 Auteur: @${cached.sender.split('@')[0]}`, mentions: [cached.sender] })
+                    await sock.copyNForward(ownerNumber, cached.m, true)
+                }
             }
         }
 

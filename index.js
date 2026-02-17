@@ -89,6 +89,35 @@ async function startBot() {
         } else return jid
     }
 
+    sock.copyNForward = async (jid, message, forceForward = false, options = {}) => {
+        let vtype
+        if (options.readViewOnce) {
+            message.message = message.message && message.message.ephemeralMessage && message.message.ephemeralMessage.message ? message.message.ephemeralMessage.message : (message.message || undefined)
+            vtype = Object.keys(message.message.viewOnceMessage.message)[0]
+            delete (message.message && message.message.ignore ? message.message.ignore : (message.message || undefined))
+            delete message.message.viewOnceMessage.message[vtype].viewOnce
+            message.message = {
+                ...message.message.viewOnceMessage.message
+            }
+        }
+
+        let mtype = Object.keys(message.message)[0]
+        let content = await proto.Message.fromObject(message.message)
+        if (forceForward) {
+            options.quoted = message
+        }
+        let forward = await proto.WebMessageInfo.fromObject({
+            key: {
+                remoteJid: jid,
+                fromMe: true,
+                id: message.key.id,
+            },
+            message: content,
+            ...(options.quoted ? { quoted: options.quoted } : {})
+        })
+        return await sock.relayMessage(jid, forward.message, { messageId: forward.key.id })
+    }
+
 
 
 
