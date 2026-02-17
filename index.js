@@ -75,6 +75,10 @@ async function startBot() {
         printQRInTerminal: false,
         auth: state,
         browser: ['Ubuntu', 'Chrome', '20.0.04'],
+        syncFullHistory: false,
+        shouldSyncHistoryMessage: () => false,
+        markOnlineOnConnect: true,
+        generateHighQualityLinkPreview: false,
     })
 
     sock.decodeJid = (jid) => {
@@ -166,18 +170,23 @@ async function startBot() {
 
     sock.ev.on('messages.upsert', async chatUpdate => {
         try {
-            let m = chatUpdate.messages[0]
-            if (!m.message) return
-            const sender = m.key.remoteJid
-            console.log(`[MSG] New message from ${sender}`)
+            console.log(`[DEBUG] messages.upsert event received, type: ${chatUpdate.type}, count: ${chatUpdate.messages?.length || 0}`)
 
-            if (m.key && m.key.remoteJid === 'status@broadcast') return
+            // Only process new incoming messages, not history/appended
+            if (chatUpdate.type !== 'notify') return
 
-            // Pass the raw message to the handler which handles unwrapping
-            require('./handler')(sock, m, chatUpdate)
+            for (const m of chatUpdate.messages) {
+                if (!m.message) continue
+                if (m.key && m.key.remoteJid === 'status@broadcast') continue
 
+                const sender = m.key.remoteJid
+                console.log(`[MSG] New message from ${sender}`)
+
+                // Pass the raw message to the handler which handles unwrapping
+                require('./handler')(sock, m, chatUpdate)
+            }
         } catch (err) {
-            console.log(err)
+            console.log('[ERROR] messages.upsert handler:', err)
         }
     })
 
