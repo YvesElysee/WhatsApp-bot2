@@ -1,5 +1,6 @@
 module.exports = {
     name: 'menu',
+    commands: ['menu', 'help'],
     run: async (sock, m, args, { reply }) => {
         const menu = `
 ╔══════════════════╗

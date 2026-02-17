@@ -113,6 +113,34 @@ module.exports = async (sock, m, chatUpdate) => {
                                 (msgType === 'templateButtonReplyMessage') ? msg.templateButtonReplyMessage.selectedId : ''
 
         m.text = (body || '').trim()
+
+        // --- Message Serialization (CRITICAL) ---
+        m.sender = sender
+        const contextInfo = msg[msgType]?.contextInfo || {}
+        m.mentionedJid = contextInfo.mentionedJid || []
+        if (contextInfo.quotedMessage) {
+            const quotedType = getContentType(contextInfo.quotedMessage)
+            m.quoted = {
+                key: {
+                    remoteJid: from,
+                    fromMe: sock.decodeJid(contextInfo.participant || '') === botNumber,
+                    id: contextInfo.stanzaId,
+                    participant: contextInfo.participant
+                },
+                sender: sock.decodeJid(contextInfo.participant || ''),
+                message: contextInfo.quotedMessage,
+                msg: contextInfo.quotedMessage[quotedType],
+                mtype: quotedType
+            }
+            // Unwrap quoted viewOnce messages
+            if (quotedType === 'viewOnceMessageV2' || quotedType === 'viewOnceMessage') {
+                const inner = m.quoted.message[quotedType].message
+                m.quoted.unwrapped = { msg: inner, type: getContentType(inner) }
+            }
+        } else {
+            m.quoted = null
+        }
+
         const prefix = '.'
         const isCmd = m.text.startsWith(prefix)
 

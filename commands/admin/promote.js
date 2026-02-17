@@ -5,7 +5,7 @@ module.exports = {
         if (!isAdmins) return reply('❌ Vous n\'êtes pas admin !')
         if (!isBotAdmins) return reply('❌ Je dois être admin.')
 
-        const user = m.mentionedJid[0] || (m.quoted ? m.quoted.sender : null)
+        const user = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
         if (!user) return reply('❌ Mentionnez quelqu\'un.')
 
         try {

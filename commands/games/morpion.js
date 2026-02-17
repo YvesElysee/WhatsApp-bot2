@@ -6,7 +6,7 @@ module.exports = {
         if (global.db.games[from]) return reply('❌ Une partie est déjà en cours dans ce chat ! Tapez `.stopgame` pour l\'arrêter.')
 
         let player1 = sock.decodeJid(m.key.participant || m.key.remoteJid)
-        let player2 = sock.decodeJid(m.mentionedJid[0] || (m.quoted ? m.quoted.sender : null))
+        let player2 = sock.decodeJid(m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null))
 
         if (!player2) return reply('❌ Mentionnez un adversaire ou répondez à son message !')
         if (player1 === player2) return reply('❌ Vous ne pouvez pas jouer contre vous-même.')

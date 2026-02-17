@@ -2,7 +2,7 @@ module.exports = {
     name: 'pp',
     run: async (sock, m, args, { reply }) => {
         // Correct JID extraction: priority to mentions, then quotes, then sender
-        const user = m.mentionedJid[0] || (m.quoted ? m.quoted.sender : m.sender)
+        const user = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : m.sender)
 
         try {
             const ppUrl = await sock.profilePictureUrl(user, 'image')
