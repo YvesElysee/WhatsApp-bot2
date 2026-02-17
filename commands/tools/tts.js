@@ -5,6 +5,8 @@ const https = require('https')
 
 module.exports = {
     name: 'tts',
+    category: 'tools',
+    desc: 'Convertit un texte en message vocal (français).',
     run: async (sock, m, args, { reply, text }) => {
         if (!text) return reply('Usage: .tts [votre texte]')
 

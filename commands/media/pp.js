@@ -1,5 +1,7 @@
 module.exports = {
     name: 'pp',
+    category: 'media',
+    desc: 'Affiche la photo de profil d\'un utilisateur.',
     run: async (sock, m, args, { reply }) => {
         // Correct JID extraction: priority to mentions, then quotes, then sender
         const user = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : m.sender)

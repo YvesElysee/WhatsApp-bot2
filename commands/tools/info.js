@@ -1,5 +1,7 @@
 module.exports = {
     name: 'info',
+    category: 'tools',
+    desc: 'Affiche des informations sur l\'utilisateur mentionné.',
     run: async (sock, m, args, { reply, text, getGeminiClient }) => {
         // Targeted user JID extraction
         const user = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null) || (args[0] ? args[0].replace(/[^0-9]/g, '') + '@s.whatsapp.net' : null)

@@ -1,5 +1,7 @@
 module.exports = {
     name: 'promote',
+    category: 'admin',
+    desc: 'Promeut un membre au rang d\'administrateur.',
     run: async (sock, m, args, { reply, isAdmins, isBotAdmins, isGroup }) => {
         if (!isGroup) return reply('❌ Commande réservée aux groupes.')
         if (!isAdmins) return reply('❌ Vous n\'êtes pas admin !')

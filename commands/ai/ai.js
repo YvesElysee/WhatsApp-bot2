@@ -2,8 +2,11 @@ const axios = require('axios')
 
 module.exports = {
     name: 'ai',
+    category: 'ai',
+    desc: 'Discute avec l\'IA (Gemini 2.0 Flash).',
     commands: ['ai', 'ely', 'gpt', 'gemini'],
-    run: async (sock, m, args, { reply, text }) => {
+    run: async (sock, m, args, { reply, text, isOwner }) => {
+        if (global.db.settings.aiOnly && !isOwner) return reply('❌ L\'accès à l\'IA est actuellement réservé au propriétaire du bot.')
         if (!text) return reply('🤖 Posez-moi une question !')
 
         // Rotation logic for 3 keys

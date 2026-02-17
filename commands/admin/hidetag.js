@@ -1,5 +1,7 @@
 module.exports = {
     name: 'hidetag',
+    category: 'admin',
+    desc: 'Notifie tous les membres du groupe sans les citer.',
     run: async (sock, m, args, { reply, text, isAdmins, isGroup }) => {
         if (!isGroup) return reply('❌ Commande réservée aux groupes.')
         if (!isAdmins) return reply('❌ Vous n\'êtes pas admin !')

@@ -1,5 +1,7 @@
 module.exports = {
     name: 'kick',
+    category: 'admin',
+    desc: 'Retire un membre du groupe.',
     run: async (sock, m, args, { reply, isAdmins, isBotAdmins, isGroup }) => {
         if (!isGroup) return reply('❌ Commande réservée aux groupes.')
         if (!isAdmins) return reply('❌ Vous n\'êtes pas admin !')

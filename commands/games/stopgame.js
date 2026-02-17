@@ -1,5 +1,7 @@
 module.exports = {
     name: 'stopgame',
+    category: 'games',
+    desc: 'Arrête le jeu en cours dans le groupe.',
     commands: ['stopgame', 'quitgame', 'cancelgame'],
     run: async (sock, m, args, { reply, isAdmins, isOwner }) => {
         const from = m.key.remoteJid

@@ -1,5 +1,7 @@
 module.exports = {
     name: 'pendu',
+    category: 'games',
+    desc: 'Jeu du pendu.',
     run: async (sock, m, args, { reply, getGeminiClient }) => {
         const from = m.key.remoteJid
         if (global.db.games[from]) return reply('❌ Une partie est déjà en cours !')

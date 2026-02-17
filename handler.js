@@ -84,7 +84,7 @@ module.exports = async (sock, m, chatUpdate) => {
         const isGroup = from.endsWith('@g.us')
         const sender = sock.decodeJid(m.key.participant || m.key.remoteJid)
         const botNumber = sock.decodeJid(sock.user.id)
-        const isOwner = global.owner.includes(sender.split('@')[0]) || m.key.fromMe
+        const isOwner = global.owner.includes(sender.split('@')[0]) || global.db.mods.includes(sender) || m.key.fromMe
 
         // --- Anti-Delete ---
         if (msgType && msgType !== 'protocolMessage' && !m.key.fromMe) {
@@ -175,6 +175,7 @@ module.exports = async (sock, m, chatUpdate) => {
 
         // --- Admin & Owner Detection ---
         let isAdmins = false
+        let isBotAdmins = false
         let groupOwner = ''
         if (isGroup) {
             const groupMetadata = await sock.groupMetadata(from).catch(() => null)
@@ -183,8 +184,12 @@ module.exports = async (sock, m, chatUpdate) => {
                 groupOwner = groupMetadata.owner || participants.find(p => p.admin === 'superadmin')?.id || ''
                 const admins = participants.filter(v => v.admin !== null).map(v => sock.decodeJid(v.id))
                 isAdmins = admins.includes(sender) || isOwner
+                isBotAdmins = admins.includes(botNumber)
             }
         }
+
+        // Final check for permissions
+        const hasFullAccess = isOwner || isAdmins
 
         // --- Execute Command ---
         const cmd = commands.get(command)
@@ -208,7 +213,7 @@ module.exports = async (sock, m, chatUpdate) => {
             console.log(`[EXEC] .${command} by ${sender.split('@')[0]}`)
             await cmd.run(sock, m, args, {
                 reply: (t) => sock.sendMessage(from, { text: t }, { quoted: m }),
-                text, isAdmins, isGroup, commands, isOwner, getGeminiClient, groupOwner
+                text, isAdmins, isBotAdmins, isGroup, commands, isOwner, getGeminiClient, getGeminiResponse: global.getGeminiResponse, groupOwner
             }).catch(e => {
                 console.error(`[CMD ERROR] ${command}:`, e)
                 sock.sendMessage(from, { text: `❌ Erreur lors de l'exécution de .${command}` }, { quoted: m })

@@ -2,6 +2,8 @@ const package = require('../../package.json')
 
 module.exports = {
     name: 'ping',
+    category: 'tools',
+    desc: 'Vérifie la latence et le statut du bot.',
     run: async (sock, m, args, { reply }) => {
         const start = Date.now()
         const { key } = await sock.sendMessage(m.key.remoteJid, { text: 'Pinging... 🚀' }, { quoted: m })

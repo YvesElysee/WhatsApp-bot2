@@ -5,6 +5,8 @@ const { exec } = require('child_process')
 
 module.exports = {
     name: 'sticker',
+    category: 'media',
+    desc: 'Convertit une image ou une vidéo en sticker.',
     commands: ['sticker', 's'],
     run: async (sock, m, args, { reply }) => {
         const quoted = m.quoted ? m.quoted : m

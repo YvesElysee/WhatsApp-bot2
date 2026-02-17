@@ -1,5 +1,7 @@
 module.exports = {
     name: 'guess',
+    category: 'games',
+    desc: 'Jeu de devinette de mot.',
     run: async (sock, m, args, { reply }) => {
         const from = m.key.remoteJid
         const secret = Math.floor(Math.random() * 10) + 1

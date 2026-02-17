@@ -49,10 +49,46 @@ global.db = {
         antidelete: false,
         autoreact: false,
         privateMode: false,
-        ibOnly: false
+        ibOnly: false,
+        aiOnly: false
     },
+    mods: [],
     msgStore: new Map(),
     geminiIndex: 0
+}
+
+// Gemini Global Helper (Axios Direct v1beta)
+global.getGeminiResponse = async (text) => {
+    const keys = [
+        process.env.GEMINI_KEY_1,
+        process.env.GEMINI_KEY_2,
+        process.env.GEMINI_KEY_3
+    ].filter(k => k && k.length > 10)
+
+    const key = keys.length > 0 ? keys[global.db.geminiIndex % keys.length] : process.env.GEMINI_API_KEY
+    if (!key) throw new Error('API Key missing')
+
+    global.db.geminiIndex++
+
+    const tryModel = async (modelId) => {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${key}`
+        return await axios.post(url, {
+            contents: [{ parts: [{ text }] }]
+        }, { timeout: 30000 })
+    }
+
+    try {
+        const res = await tryModel('gemini-2.0-flash')
+        return res.data.candidates?.[0]?.content?.parts?.[0]?.text || null
+    } catch (e) {
+        try {
+            const res = await tryModel('gemini-flash-latest')
+            return res.data.candidates?.[0]?.content?.parts?.[0]?.text || null
+        } catch (err2) {
+            const res = await tryModel('gemini-pro-latest')
+            return res.data.candidates?.[0]?.content?.parts?.[0]?.text || null
+        }
+    }
 }
 
 // Aggressive Self-Ping (Anti-Sleep)

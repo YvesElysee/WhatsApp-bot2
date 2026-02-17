@@ -2,6 +2,8 @@ const { downloadContentFromMessage } = require('@whiskeysockets/baileys')
 
 module.exports = {
     name: 'extract',
+    category: 'media',
+    desc: 'Extrait le texte d\'une image (OCR).',
     run: async (sock, m, args, { reply }) => {
         if (!m.quoted) return reply('❌ Répondez à un message ViewOnce !')
 

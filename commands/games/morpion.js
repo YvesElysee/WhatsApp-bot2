@@ -1,5 +1,7 @@
 module.exports = {
     name: 'morpion',
+    category: 'games',
+    desc: 'Jeu de morpion (Tic-Tac-Toe).',
     commands: ['morpion', 'ttt', 'tic'],
     run: async (sock, m, args, { reply, isGroup }) => {
         const from = m.key.remoteJid

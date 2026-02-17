@@ -1,5 +1,7 @@
 module.exports = {
     name: 'devine',
+    category: 'games',
+    desc: 'Jeu de devinette de nombre.',
     run: async (sock, m, args, { reply, getGeminiClient }) => {
         const client = getGeminiClient()
         if (!client) return reply('⚠️ Erreur SDK.')

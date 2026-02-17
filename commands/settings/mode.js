@@ -1,5 +1,7 @@
 module.exports = {
     name: 'mode',
+    category: 'settings',
+    desc: 'Change le mode du bot (Public/Privé).',
     run: async (sock, m, args, { reply, isOwner }) => {
         if (!isOwner) return reply('❌ Cette commande est réservée au propriétaire.')
         if (!args[0]) return reply('Usage: .mode [public/private]')

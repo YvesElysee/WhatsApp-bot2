@@ -1,5 +1,7 @@
 module.exports = {
     name: 'quiz',
+    category: 'games',
+    desc: 'Jeu de quiz de culture générale.',
     run: async (sock, m, args, { reply, getGeminiClient }) => {
         const from = m.key.remoteJid
         if (global.db.games[from]) return reply('❌ Un jeu est déjà en cours !')
