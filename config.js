@@ -5,8 +5,8 @@ const path = require('path')
 global.owner = ['237697353272'] // Put your number here
 global.mods = []
 global.prems = []
-global.packname = 'Ely-bot'
-global.author = 'Ely'
+global.packname = 'Ely Bot'
+global.author = 'Elysée'
 
 module.exports = {
     SESSION_ID: process.env.SESSION_ID || 'session',
