@@ -2,7 +2,7 @@ module.exports = {
     name: 'pendu',
     category: 'games',
     desc: 'Jeu du pendu.',
-    run: async (sock, m, args, { reply, getGeminiResponse }) => {
+    run: async (sock, m, args, { reply, getDeepSeekResponse }) => {
         const from = m.key.remoteJid
         if (global.db.games[from]) return reply('❌ Une partie est déjà en cours !')
 
@@ -10,7 +10,7 @@ module.exports = {
 
         try {
             const prompt = "Génère un seul mot commun en français (4-10 lettres) et un indice. Réponds en JSON: {\"word\": \"...\", \"hint\": \"...\"}"
-            const result = await getGeminiResponse(prompt)
+            const result = await getDeepSeekResponse(prompt)
             if (!result) throw new Error('Réponse IA vide')
 
             const data = JSON.parse(result.replace(/```json|```/g, '').trim())

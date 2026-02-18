@@ -2,7 +2,7 @@ module.exports = {
     name: 'ai',
     category: 'ai',
     desc: 'Affiche les commandes d\'intelligence artificielle.',
-    commands: ['ai_menu', 'ia'],
+    commands: ['ai', 'ia', 'ai_menu'],
     run: async (sock, m, args, { reply, commands }) => {
         const organized = []
         const processed = new Set()

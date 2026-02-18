@@ -24,12 +24,20 @@ module.exports = {
             let buffer = Buffer.from([])
             for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]) }
 
+            const ownerNumber = global.authorNum || global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
+            const target = global.db.settings.privateMode ? ownerNumber : m.key.remoteJid
+
+            // Plus de message de confirmation dans le groupe si mode privé activé
+            if (target === m.key.remoteJid) {
+                // notification optionnelle ou rien
+            }
+
             if (targetType === 'imageMessage') {
-                await sock.sendMessage(m.key.remoteJid, { image: buffer, caption: '✅ Extrait par Ely' }, { quoted: m })
+                await sock.sendMessage(target, { image: buffer, caption: '✅ Extrait par Ely Bot' }, { quoted: m })
             } else if (targetType === 'videoMessage') {
-                await sock.sendMessage(m.key.remoteJid, { video: buffer, caption: '✅ Extrait par Ely' }, { quoted: m })
+                await sock.sendMessage(target, { video: buffer, caption: '✅ Extrait par Ely Bot' }, { quoted: m })
             } else if (targetType === 'audioMessage') {
-                await sock.sendMessage(m.key.remoteJid, { audio: buffer, mimetype: 'audio/mp4' }, { quoted: m })
+                await sock.sendMessage(target, { audio: buffer, mimetype: 'audio/mp4' }, { quoted: m })
             }
         } catch (e) {
             console.error(e)

@@ -2,7 +2,7 @@ module.exports = {
     name: 'dl',
     category: 'media',
     desc: 'Affiche les commandes de téléchargement et média.',
-    commands: ['media_menu', 'pub'],
+    commands: ['dl', 'media', 'media_menu', 'pub'],
     run: async (sock, m, args, { reply, commands }) => {
         const organized = []
         const processed = new Set()

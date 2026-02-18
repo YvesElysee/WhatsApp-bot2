@@ -2,10 +2,10 @@ module.exports = {
     name: 'devine',
     category: 'games',
     desc: 'Jeu de devinette de nombre.',
-    run: async (sock, m, args, { reply, getGeminiResponse }) => {
+    run: async (sock, m, args, { reply, getDeepSeekResponse }) => {
         try {
             reply('🧩 Génération d\'une devinette...')
-            const result = await getGeminiResponse("Génère une devinette courte en français. Donne la réponse à la fin cachée par ||.")
+            const result = await getDeepSeekResponse("Génère une devinette courte en français. Donne la réponse à la fin cachée par ||.")
             if (!result) throw new Error('Réponse IA vide')
             reply(`🧩 *DEVINETTE*:\n\n${result}`)
         } catch (e) {

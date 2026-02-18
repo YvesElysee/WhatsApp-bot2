@@ -2,7 +2,7 @@ module.exports = {
     name: 'tools',
     category: 'tools',
     desc: 'Affiche les outils et utilitaires.',
-    commands: ['outils'],
+    commands: ['tools', 'outils'],
     run: async (sock, m, args, { reply, commands }) => {
         const organized = []
         const processed = new Set()

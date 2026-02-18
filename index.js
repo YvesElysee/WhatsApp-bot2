@@ -3,6 +3,16 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLat
 const pino = require('pino')
 const fs = require('fs')
 const path = require('path')
+const axios = require('axios')
+const handler = require('./handler')
+
+// Global Error Catching
+process.on('uncaughtException', (err) => {
+    console.error('[CRITICAL] Uncaught Exception:', err)
+})
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason)
+})
 
 // Ensure temp directory exists
 const tempDir = path.join(__dirname, 'temp')
@@ -50,7 +60,8 @@ global.db = {
         autoreact: false,
         privateMode: false,
         ibOnly: false,
-        aiOnly: false
+        aiOnly: false,
+        chatbot: false
     },
     mods: [],
     msgStore: new Map(),
@@ -58,7 +69,7 @@ global.db = {
 }
 
 // Multi-AI Global Helper (Gemini 1-4 & DeepSeek 1-2)
-global.getAIResponse = async (text) => {
+global.getAIResponse = async (text, provider = 'auto') => {
     const geminiKeys = [
         process.env.GEMINI_KEY_1,
         process.env.GEMINI_KEY_2,
@@ -73,61 +84,88 @@ global.getAIResponse = async (text) => {
 
     if (geminiKeys.length === 0 && dsKeys.length === 0) throw new Error('No API Keys configured')
 
-    // Try Gemini first (Rotational)
-    if (geminiKeys.length > 0) {
-        const key = geminiKeys[global.db.geminiIndex % geminiKeys.length]
-        global.db.geminiIndex++
+    const tryDeepSeek = async () => {
+        if (dsKeys.length === 0) return null
 
-        const tryGemini = async (modelId) => {
+        // Try all DeepSeek keys
+        for (let i = 0; i < dsKeys.length; i++) {
+            const index = (global.db.geminiIndex + i) % dsKeys.length
+            const key = dsKeys[index]
+            try {
+                console.log(`[AI-ROTATION] Trying DeepSeek Key ${index + 1}/${dsKeys.length}`)
+                const res = await axios.post('https://api.deepseek.com/chat/completions', {
+                    model: "deepseek-chat",
+                    messages: [{ role: "user", content: text }],
+                    stream: false
+                }, {
+                    headers: { 'Authorization': `Bearer ${key}` },
+                    timeout: 30000
+                })
+                return res.data.choices?.[0]?.message?.content || null
+            } catch (err) {
+                console.error(`[AI-ROTATION] DeepSeek Key ${index + 1} failed: ${err.message}`)
+                // Continue to next key if possible
+            }
+        }
+        return null
+    }
+
+    if (provider === 'deepseek') return await tryDeepSeek()
+
+    // Try Gemini first (Rotational)
+    if (geminiKeys.length > 0 && provider !== 'deepseek') {
+        const tryGeminiModel = async (modelId, key, keyName) => {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${key}`
             return await axios.post(url, {
                 contents: [{ parts: [{ text }] }]
             }, { timeout: 20000 })
         }
 
-        try {
-            const res = await tryGemini('gemini-2.0-flash')
-            return res.data.candidates?.[0]?.content?.parts?.[0]?.text || null
-        } catch (e) {
-            console.error(`[AI-ROTATION] Gemini failed: ${e.message}`)
-            // Fallback to flash-latest if pro fails or vice versa
+        // Try all Gemini keys
+        for (let i = 0; i < geminiKeys.length; i++) {
+            const index = (global.db.geminiIndex + i) % geminiKeys.length
+            const key = geminiKeys[index]
+
             try {
-                const res = await tryGemini('gemini-1.5-flash')
-                return res.data.candidates?.[0]?.content?.parts?.[0]?.text || null
-            } catch (err2) {
-                console.error(`[AI-ROTATION] Gemini fallback failed, trying DeepSeek...`)
+                console.log(`[AI-ROTATION] Trying Gemini-2.0-Flash Key ${index + 1}/${geminiKeys.length}`)
+                const res = await tryGeminiModel('gemini-2.0-flash', key, index + 1)
+                const out = res.data.candidates?.[0]?.content?.parts?.[0]?.text
+                if (out) {
+                    global.db.geminiIndex = (index + 1) % geminiKeys.length // Update index for next time
+                    return out
+                }
+            } catch (e) {
+                console.error(`[AI-ROTATION] Gemini-2.0-Flash Key ${index + 1} failed: ${e.message}`)
+
+                // Try fallback model for SAME key
+                try {
+                    console.log(`[AI-ROTATION] Trying Gemini-1.5-Flash Key ${index + 1}/${geminiKeys.length}`)
+                    const res = await tryGeminiModel('gemini-1.5-flash', key, index + 1)
+                    const out = res.data.candidates?.[0]?.content?.parts?.[0]?.text
+                    if (out) {
+                        global.db.geminiIndex = (index + 1) % geminiKeys.length
+                        return out
+                    }
+                } catch (err2) {
+                    console.error(`[AI-ROTATION] Gemini-1.5-Flash Key ${index + 1} failed: ${err2.message}`)
+                }
             }
         }
     }
 
-    // Fallback to DeepSeek if Gemini fails or no keys
-    if (dsKeys.length > 0) {
-        const key = dsKeys[global.db.geminiIndex % dsKeys.length] // Reuse index or separate one? GeminiIndex is fine for general rotation
-        try {
-            const res = await axios.post('https://api.deepseek.com/chat/completions', {
-                model: "deepseek-chat",
-                messages: [{ role: "user", content: text }],
-                stream: false
-            }, {
-                headers: { 'Authorization': `Bearer ${key}` },
-                timeout: 30000
-            })
-            return res.data.choices?.[0]?.message?.content || null
-        } catch (err) {
-            console.error(`[AI-ROTATION] DeepSeek failed: ${err.message}`)
-            throw new Error('All AI providers exhausted.')
-        }
-    }
+    // All Gemini keys failed or provider is deepseek fallback
+    console.log(`[AI-ROTATION] All Gemini options failed, falling back to DeepSeek...`)
+    return await tryDeepSeek()
 }
 
-// Keep legacy name for compatibility with old commands not yet updated
+// Dedicated DeepSeek Helper
+global.getDeepSeekResponse = (text) => global.getAIResponse(text, 'deepseek');
 global.getGeminiResponse = global.getAIResponse;
 
 // Aggressive Self-Ping (Anti-Sleep)
-const axios = require('axios')
 setInterval(() => {
     const url = process.env.RENDER_URL
-    if (url) {
+    if (url && axios) {
         axios.get(url).catch(() => { })
         console.log('[ELY-PING] Aggressive keep-alive ping sent.')
     }
@@ -269,8 +307,8 @@ async function startBot() {
         try {
             console.log(`[DEBUG] messages.upsert event received, type: ${chatUpdate.type}, count: ${chatUpdate.messages?.length || 0}`)
 
-            // Only process new incoming messages, not history/appended
-            if (chatUpdate.type !== 'notify') return
+            // Process both notify and append (some new messages arrive as append)
+            if (chatUpdate.type !== 'notify' && chatUpdate.type !== 'append') return
 
             for (const m of chatUpdate.messages) {
                 if (!m.message) continue
@@ -279,11 +317,13 @@ async function startBot() {
                 const sender = m.key.remoteJid
                 console.log(`[MSG] New message from ${sender}`)
 
-                // Pass the raw message to the handler which handles unwrapping
-                require('./handler')(sock, m, chatUpdate)
+                // Pass the raw message to the pre-loaded handler
+                handler(sock, m, chatUpdate).catch(err => {
+                    console.error('[ERROR] Handler Execution:', err)
+                })
             }
         } catch (err) {
-            console.log('[ERROR] messages.upsert handler:', err)
+            console.error('[ERROR] messages.upsert processing:', err)
         }
     })
 

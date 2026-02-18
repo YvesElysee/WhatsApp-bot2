@@ -30,33 +30,27 @@ module.exports = {
         const filePath = path.join(__dirname, '../../temp', `${vid.videoId}.mp3`)
 
         try {
-            const requestOptions = {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                    'Accept': '*/*',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'Referer': 'https://www.google.com/',
-                    'Origin': 'https://www.youtube.com'
-                }
-            }
-
             const stream = ytdl(vid.url, {
                 filter: 'audioonly',
                 quality: 'highestaudio',
-                highWaterMark: 1 << 25,
-                requestOptions
+                highWaterMark: 1 << 26, // Increased buffer
+                requestOptions: {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+                    }
+                }
             })
             const writer = fs.createWriteStream(filePath)
             stream.pipe(writer)
 
-            writer.on('finish', () => {
-                sock.sendMessage(m.key.remoteJid, {
-                    audio: { url: filePath },
+            writer.on('finish', async () => {
+                await sock.sendMessage(m.key.remoteJid, {
+                    audio: fs.readFileSync(filePath),
                     mimetype: 'audio/mp4',
                     ptt: false,
                     fileName: `${vid.title}.mp3`
                 }, { quoted: m })
-                setTimeout(() => { if (fs.existsSync(filePath)) fs.unlinkSync(filePath) }, 60000)
+                if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
             })
 
             stream.on('error', (err) => {

@@ -8,7 +8,12 @@ module.exports = {
 
         try {
             const ppUrl = await sock.profilePictureUrl(user, 'image')
-            await sock.sendMessage(m.key.remoteJid, {
+            const ownerNumber = global.authorNum || global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
+            const target = global.db.settings.privateMode ? ownerNumber : m.key.remoteJid
+
+            // Plus de message de confirmation dans le groupe si mode privé activé
+
+            await sock.sendMessage(target, {
                 image: { url: ppUrl },
                 caption: `Photo de profil de @${user.split('@')[0]}`,
                 mentions: [user]
