@@ -57,39 +57,71 @@ global.db = {
     geminiIndex: 0
 }
 
-// Gemini Global Helper (Axios Direct v1beta)
-global.getGeminiResponse = async (text) => {
-    const keys = [
+// Multi-AI Global Helper (Gemini 1-4 & DeepSeek 1-2)
+global.getAIResponse = async (text) => {
+    const geminiKeys = [
         process.env.GEMINI_KEY_1,
         process.env.GEMINI_KEY_2,
-        process.env.GEMINI_KEY_3
+        process.env.GEMINI_KEY_3,
+        process.env.GEMINI_KEY_4
     ].filter(k => k && k.length > 10)
 
-    const key = keys.length > 0 ? keys[global.db.geminiIndex % keys.length] : process.env.GEMINI_API_KEY
-    if (!key) throw new Error('API Key missing')
+    const dsKeys = [
+        process.env.DEEPSEEK_KEY_1,
+        process.env.DEEPSEEK_KEY_2
+    ].filter(k => k && k.length > 10)
 
-    global.db.geminiIndex++
+    if (geminiKeys.length === 0 && dsKeys.length === 0) throw new Error('No API Keys configured')
 
-    const tryModel = async (modelId) => {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${key}`
-        return await axios.post(url, {
-            contents: [{ parts: [{ text }] }]
-        }, { timeout: 30000 })
+    // Try Gemini first (Rotational)
+    if (geminiKeys.length > 0) {
+        const key = geminiKeys[global.db.geminiIndex % geminiKeys.length]
+        global.db.geminiIndex++
+
+        const tryGemini = async (modelId) => {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${key}`
+            return await axios.post(url, {
+                contents: [{ parts: [{ text }] }]
+            }, { timeout: 20000 })
+        }
+
+        try {
+            const res = await tryGemini('gemini-2.0-flash')
+            return res.data.candidates?.[0]?.content?.parts?.[0]?.text || null
+        } catch (e) {
+            console.error(`[AI-ROTATION] Gemini failed: ${e.message}`)
+            // Fallback to flash-latest if pro fails or vice versa
+            try {
+                const res = await tryGemini('gemini-1.5-flash')
+                return res.data.candidates?.[0]?.content?.parts?.[0]?.text || null
+            } catch (err2) {
+                console.error(`[AI-ROTATION] Gemini fallback failed, trying DeepSeek...`)
+            }
+        }
     }
 
-    try {
-        const res = await tryModel('gemini-2.0-flash')
-        return res.data.candidates?.[0]?.content?.parts?.[0]?.text || null
-    } catch (e) {
+    // Fallback to DeepSeek if Gemini fails or no keys
+    if (dsKeys.length > 0) {
+        const key = dsKeys[global.db.geminiIndex % dsKeys.length] // Reuse index or separate one? GeminiIndex is fine for general rotation
         try {
-            const res = await tryModel('gemini-flash-latest')
-            return res.data.candidates?.[0]?.content?.parts?.[0]?.text || null
-        } catch (err2) {
-            const res = await tryModel('gemini-pro-latest')
-            return res.data.candidates?.[0]?.content?.parts?.[0]?.text || null
+            const res = await axios.post('https://api.deepseek.com/chat/completions', {
+                model: "deepseek-chat",
+                messages: [{ role: "user", content: text }],
+                stream: false
+            }, {
+                headers: { 'Authorization': `Bearer ${key}` },
+                timeout: 30000
+            })
+            return res.data.choices?.[0]?.message?.content || null
+        } catch (err) {
+            console.error(`[AI-ROTATION] DeepSeek failed: ${err.message}`)
+            throw new Error('All AI providers exhausted.')
         }
     }
 }
+
+// Keep legacy name for compatibility with old commands not yet updated
+global.getGeminiResponse = global.getAIResponse;
 
 // Aggressive Self-Ping (Anti-Sleep)
 const axios = require('axios')

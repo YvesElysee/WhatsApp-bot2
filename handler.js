@@ -84,7 +84,8 @@ module.exports = async (sock, m, chatUpdate) => {
         const isGroup = from.endsWith('@g.us')
         const sender = sock.decodeJid(m.key.participant || m.key.remoteJid)
         const botNumber = sock.decodeJid(sock.user.id)
-        const isOwner = global.owner.includes(sender.split('@')[0]) || global.db.mods.includes(sender) || m.key.fromMe
+        const senderId = sender.split('@')[0]
+        const isOwner = global.owner.includes(senderId) || global.db.mods.some(m => sock.decodeJid(m).split('@')[0] === senderId) || m.key.fromMe
 
         // --- Anti-Delete ---
         if (msgType && msgType !== 'protocolMessage' && !m.key.fromMe) {
@@ -188,6 +189,15 @@ module.exports = async (sock, m, chatUpdate) => {
             }
         }
 
+        // Final Safety Check for Bot Admin
+        if (isGroup && !isBotAdmins) {
+            const groupMetadata = await sock.groupMetadata(from).catch(() => null)
+            if (groupMetadata) {
+                const admins = groupMetadata.participants.filter(v => v.admin !== null).map(v => sock.decodeJid(v.id))
+                isBotAdmins = admins.includes(botNumber)
+            }
+        }
+
         // Final check for permissions
         const hasFullAccess = isOwner || isAdmins
 
@@ -213,7 +223,7 @@ module.exports = async (sock, m, chatUpdate) => {
             console.log(`[EXEC] .${command} by ${sender.split('@')[0]}`)
             await cmd.run(sock, m, args, {
                 reply: (t) => sock.sendMessage(from, { text: t }, { quoted: m }),
-                text, isAdmins, isBotAdmins, isGroup, commands, isOwner, getGeminiClient, getGeminiResponse: global.getGeminiResponse, groupOwner
+                text, isAdmins, isBotAdmins, isGroup, commands, isOwner, getGeminiClient, getAIResponse: global.getAIResponse, getGeminiResponse: global.getAIResponse, groupOwner
             }).catch(e => {
                 console.error(`[CMD ERROR] ${command}:`, e)
                 sock.sendMessage(from, { text: `❌ Erreur lors de l'exécution de .${command}` }, { quoted: m })

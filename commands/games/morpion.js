@@ -13,16 +13,10 @@ module.exports = {
         if (!player2) return reply('❌ Mentionnez un adversaire ou répondez à son message !')
         if (player1 === player2) return reply('❌ Vous ne pouvez pas jouer contre vous-même.')
 
-        const board = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
+        const board = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣']
 
         const renderBoard = () => {
-            return `
-  ${board[0]} | ${board[1]} | ${board[2]}
- ---+---+---
-  ${board[3]} | ${board[4]} | ${board[5]}
- ---+---+---
-  ${board[6]} | ${board[7]} | ${board[8]}
-`
+            return `\n    ${board[0]} | ${board[1]} | ${board[2]}\n    ──────────\n    ${board[3]} | ${board[4]} | ${board[5]}\n    ──────────\n    ${board[6]} | ${board[7]} | ${board[8]}\n`
         }
 
         const checkWin = () => {
@@ -34,48 +28,45 @@ module.exports = {
             for (let w of wins) {
                 if (board[w[0]] === board[w[1]] && board[w[1]] === board[w[2]]) return board[w[0]]
             }
-            if (board.every(s => s === 'X' || s === 'O')) return 'tie'
+            if (board.every(s => s === '✖️' || s === '⭕')) return 'tie'
             return null
         }
 
         global.db.games[from] = {
             type: 'morpion',
             players: [player1, player2],
+            symbols: ['✖️', '⭕'],
             turn: 0,
             board,
             listener: async (sock, m, { body, sender, reply }) => {
                 const game = global.db.games[from]
                 if (!game || game.type !== 'morpion') return
 
-                // Only current player can play
                 if (sender !== game.players[game.turn]) return
 
                 const move = parseInt(body) - 1
-                if (isNaN(move) || move < 0 || move > 8 || board[move] === 'X' || board[move] === 'O') {
-                    // Ignore silently if it's not a valid move number to avoid spam
-                    return
-                }
+                if (isNaN(move) || move < 0 || move > 8 || board[move] === '✖️' || board[move] === '⭕') return
 
-                board[move] = game.turn === 0 ? 'X' : 'O'
+                board[move] = game.symbols[game.turn]
                 const win = checkWin()
 
                 if (win) {
-                    let msg = `🎮 *MORPION RESULTAT*\n${renderBoard()}\n`
+                    let msg = `🏆 *MORPION RESULTAT* 🏆\n${renderBoard()}\n`
                     if (win === 'tie') {
-                        msg += '🤝 Match nul !'
+                        msg += '🤝 *MATCH NUL !* Bravo aux deux joueurs.'
                     } else {
-                        msg += `🎉 @${sender.split('@')[0]} a gagné !`
+                        msg += `🎉 *VICTOIRE !* @${sender.split('@')[0]} a gagné la partie !`
                     }
-                    reply(msg)
+                    reply(msg, { mentions: [sender] })
                     delete global.db.games[from]
                 } else {
                     game.turn = 1 - game.turn
-                    let msg = `🎮 *MORPION*\n${renderBoard()}\nC'est au tour de @${game.players[game.turn].split('@')[0]} (${game.turn === 0 ? 'X' : 'O'})`
-                    reply(msg)
+                    let msg = `🎮 *MORPION SESSION* 🎮\n${renderBoard()}\n👉 Au tour de @${game.players[game.turn].split('@')[0]} (${game.symbols[game.turn]})`
+                    reply(msg, { mentions: [game.players[game.turn]] })
                 }
             }
         }
 
-        reply(`🎮 *DEBUT MORPION*\n${renderBoard()}\n👤 @${player1.split('@')[0]} (X)\n👤 @${player2.split('@')[0]} (O)\n\n👉 @${player1.split('@')[0]}, tapez un chiffre (1-9) pour jouer.`)
+        reply(`🎮 *DÉBUT DU MORPION* 🎮\n${renderBoard()}\n👤 @${player1.split('@')[0]} (✖️)\n👤 @${player2.split('@')[0]} (⭕)\n\n👉 @${player1.split('@')[0]}, tapez un chiffre pour commencer !`, { mentions: [player1, player2] })
     }
 }

@@ -2,20 +2,15 @@ module.exports = {
     name: 'devine',
     category: 'games',
     desc: 'Jeu de devinette de nombre.',
-    run: async (sock, m, args, { reply, getGeminiClient }) => {
-        const client = getGeminiClient()
-        if (!client) return reply('⚠️ Erreur SDK.')
-
+    run: async (sock, m, args, { reply, getGeminiResponse }) => {
         try {
             reply('🧩 Génération d\'une devinette...')
-            const result = await client.models.generateContent({
-                model: 'gemini-1.5-flash',
-                contents: "Génère une devinette courte en français. Donne la réponse à la fin cachée par ||."
-            })
-            reply(`🧩 *DEVINETTE*:\n\n${result.text}`)
+            const result = await getGeminiResponse("Génère une devinette courte en français. Donne la réponse à la fin cachée par ||.")
+            if (!result) throw new Error('Réponse IA vide')
+            reply(`🧩 *DEVINETTE*:\n\n${result}`)
         } catch (e) {
             console.error(e)
-            reply('❌ Erreur devinette SDK.')
+            reply('❌ Erreur de génération de devinette.')
         }
     }
 }

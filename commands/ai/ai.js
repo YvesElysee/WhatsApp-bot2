@@ -54,7 +54,7 @@ module.exports = {
                     reply(`✨ *Ely AI (Pro)*:\n\n${responseText}`)
                 } catch (err3) {
                     const errMsg = err3.response?.data?.error?.message || err3.message
-                    reply(`❌ Erreur IA: ${errMsg}\n\nNote: Tes clés semblent supporter les modèles 2.0+. Assure-toi qu'elles sont bien configurées dans Google AI Studio.`)
+                    reply(`❌ Erreur IA: ${errMsg}\n\n Suis epuisé à plus tard.`)
                 }
             }
         }

@@ -1,42 +1,40 @@
 module.exports = {
     name: 'menu',
     category: 'tools',
-    desc: 'Affiche le menu des commandes.',
+    desc: 'Affiche le menu principal (Hub).',
     commands: ['menu', 'help'],
-    run: async (sock, m, args, { reply, commands }) => {
-        const categories = {
-            tools: { emoji: '🛠', title: 'OUTILS' },
-            ai: { emoji: '🧠', title: 'INTELLIGENCE ARTIFICIELLE' },
-            admin: { emoji: '👑', title: 'ADMINISTRATION' },
-            games: { emoji: '🎮', title: 'DIVERTISSEMENT' },
-            media: { emoji: '🎞', title: 'MÉDIAS' },
-            settings: { emoji: '⚙', title: 'RÉGLAGES' }
-        }
-
-        const organized = {}
-        const processed = new Set()
-
-        commands.forEach((cmdModule, cmdName) => {
-            if (processed.has(cmdModule)) return
-            processed.add(cmdModule)
-
-            const cat = cmdModule.category || 'tools'
-            if (!organized[cat]) organized[cat] = []
-            organized[cat].push(cmdModule.name)
-        })
-
+    run: async (sock, m, args, { reply, isOwner, isAdmins }) => {
         const pushname = m.pushName || "Cher utilisateur"
-        let menuText = `╔══════════════════╗\n║     *🤖 ELY-BOT* ║\n╚══════════════════╝\n\n👋 Salut *${pushname}* !\n\n`
+        const creatorName = global.author || "Ely"
+        const creatorNumber = global.owner[0] || "237697353272"
 
-        for (const [cat, info] of Object.entries(categories)) {
-            if (organized[cat]) {
-                menuText += `${info.emoji} *${info.title}*\n`
-                menuText += organized[cat].map(c => `▸ .${c}`).join('\n') + '\n\n'
-            }
+        let menuText = `╔══════════════════════╗\n` +
+            `║     ✨ *ELY-BOT HUB* ✨   ║\n` +
+            `╚══════════════════════╝\n\n` +
+            `👋 Salut *${pushname}* !\n` +
+            `Bienvenue sur mon interface de contrôle.\n\n` +
+            `👤 *CRÉATEUR* : ${creatorName}\n` +
+            `📞 *CONTACT* : +${creatorNumber}\n\n` +
+            `--- *CATÉGORIES DISPONIBLES* ---\n\n` +
+            `🧠 *INTELLIGENCE ARTIFICIELLE*\n` +
+            `👉 Tapez \`.ai\` pour voir les commandes IA.\n\n` +
+            `🎮 *DIVERTISSEMENT & JEUX*\n` +
+            `👉 Tapez \`.game\` pour voir les jeux.\n\n` +
+            `🛠 *OUTILS & UTILITAIRES*\n` +
+            `👉 Tapez \`.tools\` pour voir les outils.\n\n` +
+            `🎞 *MÉDIAS (PLAY/DL)*\n` +
+            `👉 Tapez \`.dl\` pour voir les commandes média.\n\n` +
+            `⚙ *RÉGLAGES BOT*\n` +
+            `👉 Tapez \`.settings\` pour les réglages.\n\n`
+
+        if (isOwner || isAdmins) {
+            menuText += `👑 *ADMINISTRATION*\n` +
+                `👉 Tapez \`.admin\` pour les outils de gestion.\n\n`
         }
 
-        menuText += `_Tapez .list pour voir les fonctions de chaque commande._`
+        menuText += `━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `_Besoin d'aide ? Contactez mon créateur !_`
 
-        reply(menuText.trim(), { mentions: [m.sender] })
+        reply(menuText.trim())
     }
 }

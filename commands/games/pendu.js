@@ -2,23 +2,18 @@ module.exports = {
     name: 'pendu',
     category: 'games',
     desc: 'Jeu du pendu.',
-    run: async (sock, m, args, { reply, getGeminiClient }) => {
+    run: async (sock, m, args, { reply, getGeminiResponse }) => {
         const from = m.key.remoteJid
         if (global.db.games[from]) return reply('❌ Une partie est déjà en cours !')
-
-        const client = getGeminiClient()
-        if (!client) return reply('⚠️ Erreur SDK.')
 
         reply('🎭 L\'IA prépare un Pendu Multijoueur...')
 
         try {
             const prompt = "Génère un seul mot commun en français (4-10 lettres) et un indice. Réponds en JSON: {\"word\": \"...\", \"hint\": \"...\"}"
-            const result = await client.models.generateContent({
-                model: 'gemini-1.5-flash',
-                contents: prompt
-            })
+            const result = await getGeminiResponse(prompt)
+            if (!result) throw new Error('Réponse IA vide')
 
-            const data = JSON.parse(result.text.replace(/```json|```/g, '').trim())
+            const data = JSON.parse(result.replace(/```json|```/g, '').trim())
             const word = data.word.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
 
             const game = {
@@ -65,7 +60,7 @@ module.exports = {
             reply(render() + '\n\n👉 *Tout le monde peut participer !*')
         } catch (e) {
             console.error(e)
-            reply('❌ Erreur Pendu New SDK.')
+            reply('❌ Erreur de génération du Pendu.')
         }
     }
 }

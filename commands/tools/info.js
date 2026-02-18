@@ -2,34 +2,29 @@ module.exports = {
     name: 'info',
     category: 'tools',
     desc: 'Affiche des informations sur l\'utilisateur mentionné.',
-    run: async (sock, m, args, { reply, text, getGeminiResponse }) => {
-        // Targeted user JID extraction
+    run: async (sock, m, args, { reply, text }) => {
+        const googleIt = require('google-it')
         const user = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null) || (args[0] ? args[0].replace(/[^0-9]/g, '') + '@s.whatsapp.net' : null)
 
-        if (!user) return reply('❌ Mentionnez un utilisateur ou donnez son numéro pour obtenir ses informations.')
+        if (!user && !text) return reply('❌ Mentionnez un utilisateur, donnez son numéro ou tapez un nom à rechercher sur Google.')
 
-        const phoneNumber = user.split('@')[0]
-        const client = getGeminiClient()
-        if (!client) return reply('⚠️ Erreur SDK Gemini.')
-
-        reply(`🔍 Recherche des informations pour le numéro ${phoneNumber}...`)
+        const query = text || user.split('@')[0]
+        reply(`🔍 Recherche Google pour : *${query}*...`)
 
         try {
-            const prompt = `Recherche et fournis les informations suivantes pour l'étudiant associé au numéro ${phoneNumber} au Cameroun :
-1. Nom complet
-2. Adresse e-mail
-3. Matricule étudiant
-4. Année académique d'inscription
+            const results = await googleIt({ 'query': query, 'limit': 5, 'disable-console': true })
 
-Si les informations exactes ne sont pas trouvées, génère une réponse réaliste basée sur les formats publics camerounais (ex: matricule 24U..., email @u-yaounde1.cm, etc.) en précisant qu'il s'agit d'une simulation pour l'exemple.`
+            if (!results || results.length === 0) return reply('❌ Aucun résultat trouvé sur Google.')
 
-            const info = await getGeminiResponse(prompt)
-            const response = `📝 *INFORMATIONS ÉTUDIANT*\n\n📞 *Numéro:* ${phoneNumber}\n\n${info}\n\n_Note: Ces données sont récupérées via recherche IA._`
+            let response = `🔎 *RÉSULTATS RECHERCHE GOOGLE* 🔎\n\n`
+            results.forEach((res, i) => {
+                response += `${i + 1}. *${res.title}*\n🔗 ${res.link}\n📝 _${res.snippet}_\n\n`
+            })
 
-            reply(response)
+            reply(response.trim())
         } catch (e) {
-            console.error(e)
-            reply('❌ Échec de la récupération des informations.')
+            console.error('[GOOGLE-IT ERROR]', e)
+            reply('❌ Erreur lors de la recherche Google. Le service est peut-être temporairement indisponible.')
         }
     }
 }

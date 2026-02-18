@@ -2,23 +2,18 @@ module.exports = {
     name: 'quiz',
     category: 'games',
     desc: 'Jeu de quiz de culture générale.',
-    run: async (sock, m, args, { reply, getGeminiClient }) => {
+    run: async (sock, m, args, { reply, getGeminiResponse }) => {
         const from = m.key.remoteJid
         if (global.db.games[from]) return reply('❌ Un jeu est déjà en cours !')
-
-        const client = getGeminiClient()
-        if (!client) return reply('⚠️ Erreur SDK.')
 
         reply('🎲 Génération d\'un Quiz Multijoueur...')
 
         try {
             const prompt = "Génère une question de culture générale difficile en français avec 4 choix (A, B, C, D) et indique la lettre de la bonne réponse. Réponds UNIQUEMENT en JSON: {\"q\": \"...\", \"a\": \"...\", \"b\": \"...\", \"c\": \"...\", \"d\": \"...\", \"correct\": \"A\"}"
-            const result = await client.models.generateContent({
-                model: 'gemini-1.5-flash',
-                contents: prompt
-            })
+            const result = await getGeminiResponse(prompt)
+            if (!result) throw new Error('Réponse IA vide')
 
-            const cleanJson = result.text.replace(/```json|```/g, '').trim()
+            const cleanJson = result.replace(/```json|```/g, '').trim()
             const quiz = JSON.parse(cleanJson)
 
             const msg = `📝 *QUIZ MULTIJOUEUR*\n\n*Question:* ${quiz.q}\n\nA. ${quiz.a}\nB. ${quiz.b}\nC. ${quiz.c}\nD. ${quiz.d}\n\n👉 *Le premier qui répond gagne !*`
@@ -40,7 +35,7 @@ module.exports = {
             reply(msg)
         } catch (e) {
             console.error(e)
-            reply('❌ Erreur Quiz New SDK.')
+            reply('❌ Erreur de génération du Quiz.')
         }
     }
 }
