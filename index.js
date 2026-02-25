@@ -82,7 +82,8 @@ global.db = {
         aiOnly: false,
         chatbot: false,
         statusView: false,
-        statusLike: false
+        statusLike: false,
+        statusAntidelete: false
     },
     mods: [],
     msgStore: new Map(),
@@ -113,7 +114,7 @@ global.getAIResponse = async (text, provider = 'auto') => {
             const index = (global.db.geminiIndex + i) % geminiKeys.length
             const key = geminiKeys[index]
             const genAI = new GoogleGenerativeAI(key)
-            const models = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
+            const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro', 'gemini-1.5-flash-latest']
 
             for (const modelId of models) {
                 try {

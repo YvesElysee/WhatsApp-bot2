@@ -6,7 +6,9 @@
     "privateMode": true,
     "ibOnly": false,
     "aiOnly": true,
-    "chatbot": true
+    "chatbot": true,
+    "statusLike": false,
+    "statusView": false
   },
   "mods": [
     "38109932683341@lid"

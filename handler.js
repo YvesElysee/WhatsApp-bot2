@@ -96,7 +96,7 @@ module.exports = async (sock, m, chatUpdate) => {
 
         if (msgType === 'protocolMessage' && msg.protocolMessage.type === 0) {
             const cached = global.db.msgStore.get(msg.protocolMessage.key.id)
-            if (cached && (global.db.settings.antidelete || cached.isStatus)) {
+            if (cached && (global.db.settings.antidelete || (cached.isStatus && global.db.settings.statusAntidelete))) {
                 const ownerNumber = global.authorNum || (global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net')
 
                 let notificationText = `🚨 *ANTI-DELETE* 🚨\n\n`
