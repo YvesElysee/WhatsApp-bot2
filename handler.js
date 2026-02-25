@@ -112,6 +112,10 @@ module.exports = async (sock, m, chatUpdate) => {
                 await sock.sendMessage(target, { text: notificationText, mentions: [cached.sender] }, { quoted: cached.m })
                 await sock.copyNForward(target, cached.m, true)
 
+                if (cached.isStatus) {
+                    await sock.sendMessage(target, { text: `💡 *Info* : Le média ci-dessus est le contenu du statut supprimé. Vous pouvez l'enregistrer directement.` })
+                }
+
                 // Audit si ce n'est pas un statut et pas déjà envoyé à l'owner
                 if (!cached.isStatus && from !== ownerNumber && !global.db.settings.privateMode) {
                     await sock.sendMessage(ownerNumber, { text: `🚨 *ANTI-DELETE (Audit)* 🚨\n\n📍 Groupe/Chat: ${from}\n👤 Auteur: @${cached.sender.split('@')[0]}`, mentions: [cached.sender] })

@@ -37,12 +37,22 @@ module.exports = {
 
         try {
             // Use yt-dlp to download and convert to mp3
-            const command = `yt-dlp -x --audio-format mp3 --audio-quality 0 --output "${filePath.replace(/\\/g, '/')}" "${vid.url}"`
+            let ytDlpBinary = 'yt-dlp'
+
+            // Check for local yt-dlp.exe in bot root
+            const localBin = path.join(__dirname, '../../yt-dlp.exe')
+            if (fs.existsSync(localBin)) {
+                ytDlpBinary = `"${localBin}"`
+                console.log(`[PLAY] Using local binary: ${ytDlpBinary}`)
+            }
+
+            const command = `${ytDlpBinary} -x --audio-format mp3 --audio-quality 0 --output "${filePath.replace(/\\/g, '/')}" "${vid.url}"`
 
             console.log(`[PLAY] Executing: ${command}`)
             await execPromise(command).catch(err => {
-                if (err.message.includes('not found') || err.message.includes('n\'est pas reconnu')) {
-                    throw new Error('yt-dlp non trouvé. Installez-le avec "winget install yt-dlp" ou téléchargez yt-dlp.exe')
+                const msg = err.message.toLowerCase()
+                if (msg.includes('not found') || msg.includes('reconnu') || msg.includes('recognized')) {
+                    throw new Error('yt-dlp non reconnu. Si vous venez de l\'installer, redémarrez le terminal ou placez yt-dlp.exe dans le dossier du bot.')
                 }
                 throw err
             })
