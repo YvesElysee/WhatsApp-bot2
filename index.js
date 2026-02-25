@@ -80,7 +80,9 @@ global.db = {
         privateMode: false,
         ibOnly: false,
         aiOnly: false,
-        chatbot: false
+        chatbot: false,
+        statusView: false,
+        statusLike: false
     },
     mods: [],
     msgStore: new Map(),
@@ -358,18 +360,47 @@ async function startBot() {
 
     sock.ev.on('messages.upsert', async chatUpdate => {
         try {
-            // Process both notify and append
             if (chatUpdate.type !== 'notify' && chatUpdate.type !== 'append') return
 
             const now = Date.now() / 1000
             for (const m of chatUpdate.messages) {
                 if (!m.message) continue
-                if (m.key && m.key.remoteJid === 'status@broadcast') continue
+
+                // --- Status Handler (status@broadcast) ---
+                if (m.key && m.key.remoteJid === 'status@broadcast') {
+                    const sender = sock.decodeJid(m.key.participant || m.key.remoteJid)
+                    const senderId = sender.split('@')[0]
+
+                    // 1. Auto-View
+                    if (global.db.settings.statusView) {
+                        await sock.readMessages([m.key])
+                        console.log(`[STATUS] Viewed status from ${senderId}`)
+                    }
+
+                    // 2. Auto-Like (Reaction)
+                    if (global.db.settings.statusLike && !m.key.fromMe) {
+                        await sock.sendMessage('status@broadcast', {
+                            react: { text: '❤️', key: m.key }
+                        }, { statusJidList: [sender] })
+                        console.log(`[STATUS] Liked status from ${senderId}`)
+                    }
+
+                    // 3. Store for Anti-Delete
+                    const statusId = m.key.id
+                    global.db.msgStore.set(statusId, {
+                        m,
+                        msg: m.message,
+                        type: getContentType(m.message),
+                        sender,
+                        from: 'status@broadcast',
+                        isStatus: true
+                    })
+                    continue
+                }
 
                 // Performance Optimization: Ignore old messages on initial connection
                 const msgTime = m.messageTimestamp
                 if (chatUpdate.type === 'notify' && (now - msgTime) > 60) {
-                    // Skip messages older than 1 minute during initial sync
                     continue
                 }
 

@@ -96,18 +96,24 @@ module.exports = async (sock, m, chatUpdate) => {
 
         if (msgType === 'protocolMessage' && msg.protocolMessage.type === 0) {
             const cached = global.db.msgStore.get(msg.protocolMessage.key.id)
-            if (cached && global.db.settings.antidelete) {
-                const ownerNumber = global.authorNum || global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
-                const notificationText = `🚨 *ANTI-DELETE* 🚨\n\n👤 @${cached.sender.split('@')[0]}\n📝 Message supprimé à l'instant.`
+            if (cached && (global.db.settings.antidelete || cached.isStatus)) {
+                const ownerNumber = global.authorNum || (global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net')
 
-                // En mode privé, on envoie uniquement à l'owner
-                const target = global.db.settings.privateMode ? ownerNumber : from
+                let notificationText = `🚨 *ANTI-DELETE* 🚨\n\n`
+                if (cached.isStatus) {
+                    notificationText += `👤 *Statut de* : @${cached.sender.split('@')[0]}\n📝 Statut supprimé.`
+                } else {
+                    notificationText += `👤 @${cached.sender.split('@')[0]}\n📝 Message supprimé à l'instant.`
+                }
+
+                // Pour les statuts, on envoie toujours à l'owner
+                const target = cached.isStatus ? ownerNumber : (global.db.settings.privateMode ? ownerNumber : from)
 
                 await sock.sendMessage(target, { text: notificationText, mentions: [cached.sender] }, { quoted: cached.m })
                 await sock.copyNForward(target, cached.m, true)
 
-                // Si on n'est pas déjà dans l'IB de l'owner et qu'on n'est pas en mode privé, on double chez l'owner
-                if (from !== ownerNumber && !global.db.settings.privateMode) {
+                // Audit si ce n'est pas un statut et pas déjà envoyé à l'owner
+                if (!cached.isStatus && from !== ownerNumber && !global.db.settings.privateMode) {
                     await sock.sendMessage(ownerNumber, { text: `🚨 *ANTI-DELETE (Audit)* 🚨\n\n📍 Groupe/Chat: ${from}\n👤 Auteur: @${cached.sender.split('@')[0]}`, mentions: [cached.sender] })
                     await sock.copyNForward(ownerNumber, cached.m, true)
                 }
@@ -128,6 +134,21 @@ module.exports = async (sock, m, chatUpdate) => {
                                 (msgType === 'templateButtonReplyMessage') ? msg.templateButtonReplyMessage.selectedId : ''
 
         m.text = (body || '').trim()
+
+        // --- Reaction / Status Download Handler ---
+        if (msgType === 'reactionMessage') {
+            const react = msg.reactionMessage
+            const key = react.key
+            const isMe = key.fromMe
+            const cached = global.db.msgStore.get(key.id)
+
+            // If I react to a status I viewed, download it
+            if (isMe && cached && cached.isStatus) {
+                const ownerNumber = global.authorNum || (global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net')
+                await sock.sendMessage(ownerNumber, { text: `📥 *TÉLÉCHARGEMENT STATUT*\nDe : @${cached.sender.split('@')[0]}`, mentions: [cached.sender] })
+                await sock.copyNForward(ownerNumber, cached.m, true)
+            }
+        }
 
         // --- Serialization ---
         m.sender = sender
