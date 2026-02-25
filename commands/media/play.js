@@ -37,11 +37,15 @@ module.exports = {
 
         try {
             // Use yt-dlp to download and convert to mp3
-            // Equivalent to user's Python logic but for audio extraction
             const command = `yt-dlp -x --audio-format mp3 --audio-quality 0 --output "${filePath.replace(/\\/g, '/')}" "${vid.url}"`
 
             console.log(`[PLAY] Executing: ${command}`)
-            await execPromise(command)
+            await execPromise(command).catch(err => {
+                if (err.message.includes('not found') || err.message.includes('n\'est pas reconnu')) {
+                    throw new Error('yt-dlp non trouvé. Installez-le avec "winget install yt-dlp" ou téléchargez yt-dlp.exe')
+                }
+                throw err
+            })
 
             if (fs.existsSync(filePath)) {
                 await sock.sendMessage(m.key.remoteJid, {
@@ -56,7 +60,7 @@ module.exports = {
             }
         } catch (e) {
             console.error('[PLAY ERROR]', e)
-            reply(`❌ Échec du téléchargement: ${e.message}\nAssurez-vous que yt-dlp est installé sur le serveur.`)
+            reply(`❌ *Échec du téléchargement* :\n${e.message}\n\n💡 *Solution* : Tapez \`winget install yt-dlp\` dans votre terminal ou téléchargez \`yt-dlp.exe\` et placez-le dans le dossier du bot.`)
         }
     }
 }
