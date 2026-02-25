@@ -43,8 +43,14 @@ module.exports = {
                 } catch (err) { }
             }
 
-            // Réponse de succès redirigée si nécessaire par smartReply du handler
-            reply(`✅ *PURGE RÉUSSIE*\nCible: \`${targetJid.split('@')[0]}\`\nMessages supprimés: *${deleted}*`)
+            // Réponse de succès envoyée en INBOX au propriétaire
+            const ownerJid = global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
+            const successMsg = `✅ *PURGE RÉUSSIE*\nCible: \`${targetJid.split('@')[0]}\`\nMessages supprimés: *${deleted}*`
+
+            await sock.sendMessage(ownerJid, { text: successMsg })
+
+            // Notification discrète ou rien dans le groupe
+            reply('✅ Action terminée. Les détails ont été envoyés dans votre inbox.')
         } catch (e) {
             console.error('[PURGE ERROR]', e)
             reply('❌ Erreur lors de la purge groupée.')

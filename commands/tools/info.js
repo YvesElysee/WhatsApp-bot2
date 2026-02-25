@@ -16,9 +16,20 @@ module.exports = {
 
             if (!results || results.length === 0) return reply('❌ Aucun résultat trouvé sur Google.')
 
-            let response = `🔎 *RÉSULTATS RECHERCHE GOOGLE* 🔎\n\n`
+            let rawResults = results.map((res, i) => `${i + 1}. ${res.title}\n${res.snippet}`).join('\n\n')
+
+            // IA Summarization (Now uses Wisdom Gate by default)
+            const prompt = `Voici des résultats de recherche Google pour "${query}". Fais-en un résumé court et élégant en français :\n\n${rawResults}`
+            const aiSummary = await global.getAIResponse(prompt)
+
+            let response = `🔎 *INFO / RECHERCHE* : ${query}\n`
+            if (aiSummary && aiSummary.out) {
+                response += `\n🤖 *RÉSUMÉ IA* :\n${aiSummary.out}\n\n`
+            }
+
+            response += `🌐 *SOURCES* :\n`
             results.forEach((res, i) => {
-                response += `${i + 1}. *${res.title}*\n🔗 ${res.link}\n📝 _${res.snippet}_\n\n`
+                response += `${i + 1}. *${res.title}*\n🔗 ${res.link}\n`
             })
 
             reply(response.trim())

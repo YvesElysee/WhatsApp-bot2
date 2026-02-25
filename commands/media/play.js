@@ -1,14 +1,17 @@
 const yts = require('yt-search')
 const fs = require('fs')
 const path = require('path')
-let ytdl = null
-try { ytdl = require('@distube/ytdl-core') } catch (e) { }
+const { exec } = require('child_process')
+const util = require('util')
+const execPromise = util.promisify(exec)
 
 module.exports = {
     name: 'play',
     category: 'media',
     desc: 'Recherche et joue de la musique depuis YouTube.',
     run: async (sock, m, args, { reply, text }) => {
+        if (!text) return reply('❌ Veuillez fournir un titre ou un lien YouTube.')
+
         reply('🔍 Recherche...')
         const res = await yts(text)
         const vid = res.videos[0]
@@ -18,7 +21,6 @@ module.exports = {
             `📌 *Titre :* ${vid.title}\n` +
             `🕒 *Durée :* ${vid.timestamp}\n` +
             `👀 *Vues :* ${vid.views.toLocaleString()}\n` +
-            `📅 *Publié :* ${vid.ago}\n` +
             `🔗 *Lien :* ${vid.url}\n\n` +
             `📥 _Téléchargement du MP3 en cours..._`
 
@@ -27,39 +29,34 @@ module.exports = {
             caption: msgText
         }, { quoted: m })
 
-        const filePath = path.join(__dirname, '../../temp', `${vid.videoId}.mp3`)
+        const tempDir = path.join(__dirname, '../../temp')
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true })
+
+        const fileName = `${Date.now()}.mp3`
+        const filePath = path.join(tempDir, fileName)
 
         try {
-            const stream = ytdl(vid.url, {
-                filter: 'audioonly',
-                quality: 'highestaudio',
-                highWaterMark: 1 << 26, // Increased buffer
-                requestOptions: {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-                    }
-                }
-            })
-            const writer = fs.createWriteStream(filePath)
-            stream.pipe(writer)
+            // Use yt-dlp to download and convert to mp3
+            // Equivalent to user's Python logic but for audio extraction
+            const command = `yt-dlp -x --audio-format mp3 --audio-quality 0 --output "${filePath.replace(/\\/g, '/')}" "${vid.url}"`
 
-            writer.on('finish', async () => {
+            console.log(`[PLAY] Executing: ${command}`)
+            await execPromise(command)
+
+            if (fs.existsSync(filePath)) {
                 await sock.sendMessage(m.key.remoteJid, {
                     audio: fs.readFileSync(filePath),
                     mimetype: 'audio/mp4',
                     ptt: false,
                     fileName: `${vid.title}.mp3`
                 }, { quoted: m })
-                if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
-            })
-
-            stream.on('error', (err) => {
-                console.error('[YTDL ERROR]', err)
-                reply(`❌ Erreur lors du téléchargement: ${err.message}`)
-            })
+                fs.unlinkSync(filePath)
+            } else {
+                throw new Error('File not found after download')
+            }
         } catch (e) {
-            console.error(e)
-            reply('❌ Échec de la conversion MP3.')
+            console.error('[PLAY ERROR]', e)
+            reply(`❌ Échec du téléchargement: ${e.message}\nAssurez-vous que yt-dlp est installé sur le serveur.`)
         }
     }
 }

@@ -4,7 +4,7 @@ module.exports = {
     name: 'stt',
     category: 'ai',
     desc: 'Retranscrit un message vocal en texte.',
-    run: async (sock, m, args, { reply, getGeminiClient }) => {
+    run: async (sock, m, args, { reply }) => {
         const quoted = m.quoted ? m.quoted : m
         const mime = (quoted.msg || quoted).mimetype || ''
 
@@ -18,10 +18,18 @@ module.exports = {
             for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]) }
 
             const prompt = "Transcris cet audio en texte français. Ne renvoie que le texte."
-            // Note: Since getGeminiResponse currently only handles text, we might need to adjust it for audio
-            // For now, let's keep stt as is but fix the model ID and headers
-            const keys = [process.env.GEMINI_KEY_1, process.env.GEMINI_KEY_2, process.env.GEMINI_KEY_3].filter(k => k)
-            const key = keys[global.db.geminiIndex % keys.length] || process.env.GEMINI_API_KEY
+
+            // Shared key logic with index.js for consistency
+            const clean = (k) => (typeof k === 'string') ? k.trim() : ''
+            const keys = [
+                clean(process.env.GEMINI_KEY_1),
+                clean(process.env.GEMINI_KEY_2),
+                clean(process.env.GEMINI_KEY_3),
+                clean(process.env.GEMINI_KEY_4)
+            ].filter(k => k.length > 10 && k.startsWith('AIza'))
+
+            const key = keys[global.db.geminiIndex % keys.length]
+            if (!key) throw new Error('Aucune clé Gemini valide pour la transcription')
 
             const axios = require('axios')
             const result = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {

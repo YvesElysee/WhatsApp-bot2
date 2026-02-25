@@ -4,6 +4,7 @@ const pino = require('pino')
 const fs = require('fs')
 const path = require('path')
 const axios = require('axios')
+const { OpenAI } = require('openai')
 const handler = require('./handler')
 
 // Global Error Catching
@@ -68,108 +69,128 @@ global.db = {
     geminiIndex: 0
 }
 
-// Multi-AI Global Helper (Gemini 1-4 & DeepSeek 1-2)
+const { GoogleGenerativeAI } = require('@google/generative-ai')
+
+// Global Database & Settings
+global.db = {
+    games: {},
+    settings: {
+        antidelete: false,
+        autoreact: false,
+        privateMode: false,
+        ibOnly: false,
+        aiOnly: false,
+        chatbot: false
+    },
+    mods: [],
+    msgStore: new Map(),
+    geminiIndex: 0
+}
+
+// Multi-AI Global Helper
 global.getAIResponse = async (text, provider = 'auto') => {
+    const clean = (k) => (typeof k === 'string') ? k.trim() : ''
+
     const geminiKeys = [
-        process.env.GEMINI_KEY_1,
-        process.env.GEMINI_KEY_2,
-        process.env.GEMINI_KEY_3,
-        process.env.GEMINI_KEY_4
-    ].filter(k => k && k.length > 10)
+        clean(process.env.GEMINI_KEY_1),
+        clean(process.env.GEMINI_KEY_2),
+        clean(process.env.GEMINI_KEY_3),
+        clean(process.env.GEMINI_KEY_4)
+    ].filter(k => k.length > 10 && k.startsWith('AIza'))
 
-    const dsKeys = [
-        process.env.DEEPSEEK_KEY_1,
-        process.env.DEEPSEEK_KEY_2
-    ].filter(k => k && k.length > 10)
+    const wgKeys = [
+        clean(process.env.WISDOM_GATE_KEY_1),
+        clean(process.env.WISDOM_GATE_KEY_2)
+    ].filter(k => k.length > 10 && !k.includes('votre_cle'))
 
-    if (geminiKeys.length === 0 && dsKeys.length === 0) throw new Error('No API Keys configured')
+    console.log(`[AI-DEBUG] Gemini Keys: ${geminiKeys.length}, Wisdom Gate Keys: ${wgKeys.length}`)
 
-    const tryDeepSeek = async () => {
-        if (dsKeys.length === 0) return null
+    const tryGemini = async () => {
+        if (geminiKeys.length === 0) return null
+        for (let i = 0; i < geminiKeys.length; i++) {
+            const index = (global.db.geminiIndex + i) % geminiKeys.length
+            const key = geminiKeys[index]
+            const genAI = new GoogleGenerativeAI(key)
+            const models = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash']
 
-        // Try all DeepSeek keys
-        for (let i = 0; i < dsKeys.length; i++) {
-            const index = (global.db.geminiIndex + i) % dsKeys.length
-            const key = dsKeys[index]
-            try {
-                console.log(`[AI-ROTATION] Trying DeepSeek Key ${index + 1}/${dsKeys.length}`)
-                const res = await axios.post('https://api.deepseek.com/chat/completions', {
-                    model: "deepseek-chat",
-                    messages: [{ role: "user", content: text }],
-                    stream: false
-                }, {
-                    headers: { 'Authorization': `Bearer ${key}` },
-                    timeout: 30000
-                })
-                return res.data.choices?.[0]?.message?.content || null
-            } catch (err) {
-                console.error(`[AI-ROTATION] DeepSeek Key ${index + 1} failed: ${err.message}`)
-                // Continue to next key if possible
+            for (const modelId of models) {
+                try {
+                    console.log(`[AI-ROTATION] Trying Gemini SDK (${modelId}) with Key ${index + 1}`)
+                    const model = genAI.getGenerativeModel({ model: modelId })
+                    const result = await model.generateContent(text)
+                    const out = result.response.text()
+                    if (out) {
+                        global.db.geminiIndex = (index + 1) % geminiKeys.length
+                        return out
+                    }
+                } catch (e) {
+                    console.error(`[AI-ROTATION] Gemini ${modelId} (Key ${index + 1}) failed: ${e.message}`)
+                }
             }
         }
         return null
     }
 
-    if (provider === 'deepseek') return await tryDeepSeek()
+    const tryWisdomGate = async () => {
+        if (wgKeys.length === 0) return null
+        for (let i = 0; i < wgKeys.length; i++) {
+            const index = (global.db.geminiIndex + i) % wgKeys.length
+            const key = wgKeys[index]
 
-    // Try Gemini first (Rotational)
-    if (geminiKeys.length > 0 && provider !== 'deepseek') {
-        const tryGeminiModel = async (modelId, key, keyName) => {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${key}`
-            return await axios.post(url, {
-                contents: [{ parts: [{ text }] }]
-            }, { timeout: 20000 })
-        }
+            const client = new OpenAI({
+                apiKey: key,
+                baseURL: "https://wisdom-gate.juheapi.com/v1"
+            })
 
-        // Try all Gemini keys
-        for (let i = 0; i < geminiKeys.length; i++) {
-            const index = (global.db.geminiIndex + i) % geminiKeys.length
-            const key = geminiKeys[index]
+            const wgModels = ["deepseek-r1", "deepseek-v3.1-terminus", "gpt-5-nano"]
 
-            try {
-                console.log(`[AI-ROTATION] Trying Gemini-2.0-Flash Key ${index + 1}/${geminiKeys.length}`)
-                const res = await tryGeminiModel('gemini-2.0-flash', key, index + 1)
-                const out = res.data.candidates?.[0]?.content?.parts?.[0]?.text
-                if (out) {
-                    global.db.geminiIndex = (index + 1) % geminiKeys.length // Update index for next time
-                    return out
-                }
-            } catch (e) {
-                console.error(`[AI-ROTATION] Gemini-2.0-Flash Key ${index + 1} failed: ${e.message}`)
-
-                // Try fallback model for SAME key
+            for (const modelId of wgModels) {
                 try {
-                    console.log(`[AI-ROTATION] Trying Gemini-1.5-Flash Key ${index + 1}/${geminiKeys.length}`)
-                    const res = await tryGeminiModel('gemini-1.5-flash', key, index + 1)
-                    const out = res.data.candidates?.[0]?.content?.parts?.[0]?.text
-                    if (out) {
-                        global.db.geminiIndex = (index + 1) % geminiKeys.length
-                        return out
-                    }
-                } catch (err2) {
-                    console.error(`[AI-ROTATION] Gemini-1.5-Flash Key ${index + 1} failed: ${err2.message}`)
+                    console.log(`[AI-ROTATION] Trying Wisdom Gate (${modelId}) via SDK with Key ${index + 1}`)
+                    const completion = await client.chat.completions.create({
+                        model: modelId,
+                        messages: [{ role: "user", content: text }],
+                        max_tokens: 1000
+                    })
+                    const out = completion.choices?.[0]?.message?.content
+                    if (out) return out
+                } catch (err) {
+                    console.error(`[AI-ROTATION] Wisdom Gate ${modelId} (Key ${index + 1}) failed: ${err.message}`)
+                    if (err.status === 401 || err.status === 402) break
                 }
             }
         }
+        return null
     }
 
-    // All Gemini keys failed or provider is deepseek fallback
-    console.log(`[AI-ROTATION] All Gemini options failed, falling back to DeepSeek...`)
-    return await tryDeepSeek()
+    // Attempt AI selection
+    if (provider === 'gemini') {
+        const out = await tryGemini()
+        if (out) return { out }
+    } else if (provider === 'wisdom' || provider === 'wg') {
+        const out = await tryWisdomGate()
+        if (out) return { out }
+    } else {
+        // Default: Try Wisdom Gate then Gemini
+        const wgOut = await tryWisdomGate()
+        if (wgOut) return { out: wgOut }
+        const geminiOut = await tryGemini()
+        if (geminiOut) return { out: geminiOut }
+    }
+
+    return { error: 'ALL_AI_FAILED' }
 }
 
-// Dedicated DeepSeek Helper
-global.getDeepSeekResponse = (text) => global.getAIResponse(text, 'deepseek');
 global.getGeminiResponse = global.getAIResponse;
 
 // Aggressive Self-Ping (Anti-Sleep)
 setInterval(() => {
-    const url = process.env.RENDER_URL
+    const url = process.env.RENDER_EXTERNAL_URL || process.env.RENDER_URL
     if (url && axios) {
         axios.get(url).catch(() => { })
         console.log('[ELY-PING] Aggressive keep-alive ping sent.')
     }
-}, 5000)
+}, 30000) // Increased to 30s to be less aggressive but still effective
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('session')
@@ -303,19 +324,69 @@ async function startBot() {
 
     sock.public = true
 
+    const dbPath = path.join(__dirname, 'database.json')
+
+    // Load Database from file
+    const loadDatabase = () => {
+        try {
+            if (fs.existsSync(dbPath)) {
+                const data = JSON.parse(fs.readFileSync(dbPath, 'utf-8'))
+                global.db = { ...global.db, ...data }
+                // Re-initialize non-serializable parts
+                global.db.msgStore = new Map()
+                global.db.geminiIndex = 0
+                console.log('[DB] Database loaded successfully.')
+            }
+        } catch (e) {
+            console.error('[DB] Error loading database:', e)
+        }
+    }
+
+    // Save Database to file
+    const saveDatabase = () => {
+        try {
+            const dataToSave = { ...global.db }
+            delete dataToSave.msgStore // Don't save large Map
+            fs.writeFileSync(dbPath, JSON.stringify(dataToSave, null, 2))
+        } catch (e) {
+            console.error('[DB] Error saving database:', e)
+        }
+    }
+
+    loadDatabase()
+    setInterval(saveDatabase, 30000) // Auto-save every 30s
+
     sock.ev.on('messages.upsert', async chatUpdate => {
         try {
-            console.log(`[DEBUG] messages.upsert event received, type: ${chatUpdate.type}, count: ${chatUpdate.messages?.length || 0}`)
-
-            // Process both notify and append (some new messages arrive as append)
+            // Process both notify and append
             if (chatUpdate.type !== 'notify' && chatUpdate.type !== 'append') return
 
+            const now = Date.now() / 1000
             for (const m of chatUpdate.messages) {
                 if (!m.message) continue
                 if (m.key && m.key.remoteJid === 'status@broadcast') continue
 
-                const sender = m.key.remoteJid
-                console.log(`[MSG] New message from ${sender}`)
+                // Performance Optimization: Ignore old messages on initial connection
+                const msgTime = m.messageTimestamp
+                if (chatUpdate.type === 'notify' && (now - msgTime) > 60) {
+                    // Skip messages older than 1 minute during initial sync
+                    continue
+                }
+
+                const senderJid = m.key.remoteJid
+                const senderNumber = senderJid.split('@')[0]
+
+                // Extract message content for logging
+                const msg = m.message
+                const msgType = Object.keys(msg)[0]
+                let content = ''
+                if (msgType === 'conversation') content = msg.conversation
+                else if (msgType === 'extendedTextMessage') content = msg.extendedTextMessage.text
+                else if (msgType === 'imageMessage') content = '[IMAGE] ' + (msg.imageMessage.caption || '')
+                else if (msgType === 'videoMessage') content = '[VIDEO] ' + (msg.videoMessage.caption || '')
+                else content = `[${msgType}]`
+
+                console.log(`[MSG] ${senderNumber}: ${content}`)
 
                 // Pass the raw message to the pre-loaded handler
                 handler(sock, m, chatUpdate).catch(err => {

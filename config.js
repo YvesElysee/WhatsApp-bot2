@@ -1,6 +1,6 @@
-require('dotenv').config()
-const fs = require('fs')
 const path = require('path')
+const fs = require('fs')
+require('dotenv').config({ path: path.join(__dirname, '.env') })
 
 global.owner = ['237697353272'] // Put your number here
 global.mods = []

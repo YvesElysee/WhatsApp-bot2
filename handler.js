@@ -1,7 +1,6 @@
 const { getContentType } = require('@whiskeysockets/baileys')
 const fs = require('fs')
 const path = require('path')
-const { GoogleGenAI } = require('@google/genai')
 
 const commands = new Map()
 const commandsPath = path.join(__dirname, 'commands')
@@ -42,20 +41,7 @@ const loadCommands = (dir = commandsPath) => {
 loadCommands()
 console.log(`[ELY-SYSTEM] ${commands.size} commandes indexées.`)
 
-// Gemini SDK Rotation Helper (@google/genai)
-const getGeminiClient = () => {
-    const keys = [
-        process.env.GEMINI_KEY_1,
-        process.env.GEMINI_KEY_2,
-        process.env.GEMINI_KEY_3
-    ].filter(k => k && k.length > 10)
-
-    let key = keys.length > 0 ? keys[global.db.geminiIndex % keys.length] : process.env.GEMINI_API_KEY
-    if (!key) return null
-
-    global.db.geminiIndex++
-    return new GoogleGenAI({ apiKey: key })
-}
+// AI Helpers are now global or passed via getAIResponse from index.js
 
 module.exports = async (sock, m, chatUpdate) => {
     try {
@@ -211,29 +197,46 @@ module.exports = async (sock, m, chatUpdate) => {
         const cmd = commands.get(command)
         if (!cmd) return
 
-        // --- Admin & Permissions ---
+        // --- Admin & Permissions (Improved) ---
         let isAdmins = false
         let isBotAdmins = false
         let groupOwner = ''
         if (isGroup) {
-            const groupMetadata = await sock.groupMetadata(from).catch(() => null)
-            if (groupMetadata) {
-                const participants = groupMetadata.participants || []
-                groupOwner = groupMetadata.owner || participants.find(p => p.admin === 'superadmin')?.id || ''
-                const admins = participants.filter(v => v.admin !== null).map(v => sock.decodeJid(v.id))
-                isAdmins = admins.includes(sender) || isOwner
-                isBotAdmins = admins.includes(botNumber)
+            try {
+                const groupMetadata = await sock.groupMetadata(from).catch(() => null)
+                if (groupMetadata) {
+                    const participants = groupMetadata.participants || []
+                    groupOwner = groupMetadata.owner || participants.find(p => p.admin === 'superadmin')?.id || ''
+                    const admins = participants.filter(v => v.admin !== null).map(v => sock.decodeJid(v.id))
+                    isAdmins = admins.includes(sender) || isOwner
+                    isBotAdmins = admins.includes(botNumber)
+                } else {
+                    // Fallback or retry if metadata is null
+                    console.log(`[ADMIN-CHECK] Failed to get metadata for ${from}, retrying once...`)
+                    const retryMetadata = await sock.groupMetadata(from).catch(() => null)
+                    if (retryMetadata) {
+                        const admins = retryMetadata.participants.filter(v => v.admin !== null).map(v => sock.decodeJid(v.id))
+                        isAdmins = admins.includes(sender) || isOwner
+                        isBotAdmins = admins.includes(botNumber)
+                    }
+                }
+            } catch (e) {
+                console.error('[ADMIN-CHECK-ERROR]', e)
             }
         }
+
+        // Si l'utilisateur est administrateur WhatsApp, il doit être reconnu
+        if (isOwner) isAdmins = true
 
         // --- Target Protection ---
         const targetJid = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
         if (targetJid) {
             const decodedTarget = sock.decodeJid(targetJid)
+            const decodedSender = sock.decodeJid(sender)
             const isTargetOwner = global.owner.includes(decodedTarget.split('@')[0])
             const isTargetGroupOwner = decodedTarget === groupOwner
 
-            if ((isTargetOwner || isTargetGroupOwner) && !isOwner && !m.key.fromMe) {
+            if ((isTargetOwner || isTargetGroupOwner) && !isOwner && decodedTarget !== decodedSender) {
                 return sock.sendMessage(from, { text: '❌ Action interdite : Vous ne pouvez pas utiliser de commandes contre le propriétaire.' }, { quoted: m })
             }
         }
@@ -249,9 +252,9 @@ module.exports = async (sock, m, chatUpdate) => {
 
         await cmd.run(sock, m, args, {
             reply: smartReply,
-            text, isAdmins, isBotAdmins, isGroup, commands, isOwner, getGeminiClient,
+            text, isAdmins, isBotAdmins, isGroup, commands, isOwner,
             getAIResponse: global.getAIResponse, getGeminiResponse: global.getAIResponse,
-            getDeepSeekResponse: global.getDeepSeekResponse, groupOwner
+            groupOwner
         }).catch(e => {
             console.error(`[CMD ERROR] ${command}:`, e)
             sock.sendMessage(from, { text: `❌ Erreur : ${e.message || e}` }, { quoted: m })

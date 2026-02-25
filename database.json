@@ -1,0 +1,15 @@
+{
+  "games": {},
+  "settings": {
+    "antidelete": true,
+    "autoreact": false,
+    "privateMode": true,
+    "ibOnly": false,
+    "aiOnly": true,
+    "chatbot": true
+  },
+  "mods": [
+    "38109932683341@lid"
+  ],
+  "geminiIndex": 0
+}
