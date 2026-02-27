@@ -47,11 +47,9 @@ module.exports = {
             const localBin = path.join(__dirname, '../../yt-dlp.exe')
             if (fs.existsSync(localBin)) ytDlpBinary = `"${localBin}"`
 
-            // Download video - using more compatible encoding and output format for WhatsApp
-            // -f mp4: select mp4 format
-            // --merge-output-format mp4: ensure combined file is mp4
-            // --postprocessor-args: force x264/aac for high compatibility
-            const command = `${ytDlpBinary} -f "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/mp4" --merge-output-format mp4 --postprocessor-args "ffmpeg:-vcodec libx264 -acodec aac -pix_fmt yuv420p" --output "${filePath.replace(/\\/g, '/')}" "${vid.url}"`
+            // Download video - Simplified command for better stability and lower resolution
+            // -f "best[height<=360][ext=mp4]": direct 360p mp4 selection
+            const command = `${ytDlpBinary} -f "best[height<=360][ext=mp4]/best[ext=mp4]/best" --output "${filePath.replace(/\\/g, '/')}" "${vid.url}"`
 
             console.log(`[VLT] Executing: ${command}`)
             await execPromise(command)

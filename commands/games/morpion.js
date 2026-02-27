@@ -25,15 +25,15 @@ module.exports = {
 
         if (sender === player2) return reply('❌ Jouer contre soi-même ? Vraiment ?')
 
-        // 10x10 Board
-        const size = 10
+        // 9x9 Board
+        const size = 9
         const board = Array(size * size).fill('⬜')
 
         const renderBoard = (b) => {
-            let out = '  1 2 3 4 5 6 7 8 9 🔟\n'
+            let out = '  1 2 3 4 5 6 7 8 9\n'
             for (let i = 0; i < size; i++) {
                 const row = b.slice(i * size, (i + 1) * size)
-                out += `${(i + 1) % 10}${row.join('')}\n`
+                out += `${i + 1} ${row.join('')}\n`
             }
             return out
         }
