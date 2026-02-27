@@ -12,7 +12,7 @@ module.exports = {
 
         // --- Standardized Launch Flow ---
         if (!args[0] && !player2) {
-            return reply(`🎮 *MORPION 10x10* 🎮\n\nChoisissez votre mode :\n1️⃣ *.morpion solo* (contre l'IA)\n2️⃣ *.morpion @ami* (contre un ami)`)
+            return reply(`🎮 *MORPION 9x9* 🎮\n\nChoisissez votre mode :\n1️⃣ *.morpion solo* (contre l'IA)\n2️⃣ *.morpion @ami* (contre un ami)`)
         }
 
         let isAI = false
@@ -127,6 +127,6 @@ module.exports = {
             }
         }
 
-        reply(`🎮 *DÉBUT MORPION 10x10* 🎮\n${renderBoard(board)}\n👤 Joueur 1: @${sender.split('@')[0]}\n👤 Joueur 2: ${isAI ? '🤖 IA' : '@' + player2.split('@')[0]}\n\n👉 Tapez un chiffre entre **1 et 100** !`, { mentions: [sender, player2] })
+        reply(`🎮 *DÉBUT MORPION 9x9* 🎮\n${renderBoard(board)}\n👤 Joueur 1: @${sender.split('@')[0]}\n👤 Joueur 2: ${isAI ? '🤖 IA' : '@' + player2.split('@')[0]}\n\n👉 Tapez un chiffre entre **1 et 81** !`, { mentions: [sender, player2] })
     }
 }
