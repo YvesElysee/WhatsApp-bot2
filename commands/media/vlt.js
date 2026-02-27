@@ -8,7 +8,7 @@ const execPromise = util.promisify(exec)
 module.exports = {
     name: 'vlt',
     category: 'media',
-    desc: 'Télécharge une vidéo YouTube (max 4 min).',
+    desc: 'Télécharge une vidéo YouTube (max 5 min).',
     commands: ['vlt', 'video4', 'clip'],
     run: async (sock, m, args, { reply, text }) => {
         if (!text) return reply('❌ Veuillez fournir un titre ou un lien YouTube.')
@@ -18,9 +18,9 @@ module.exports = {
         const vid = res.videos[0]
         if (!vid) return reply('❌ Aucun résultat trouvé.')
 
-        // Check duration (4 minutes = 240 seconds)
-        if (vid.seconds > 240) {
-            return reply(`⏳ *Désolé, ce clip est trop long !*\nLa durée est de *${vid.timestamp}*.\nVeuillez choisir une chanson/vidéo de *moins de 4 minutes*.`)
+        // Check duration (5 minutes = 300 seconds)
+        if (vid.seconds > 300) {
+            return reply(`⏳ *Désolé, ce clip est trop long !*\nLa durée est de *${vid.timestamp}*.\nVeuillez choisir une chanson/vidéo de *moins de 5 minutes*.`)
         }
 
         const msgText = `🎞 *ELY-VIDEO DOWNLOADER* 🎞\n\n` +
@@ -47,8 +47,11 @@ module.exports = {
             const localBin = path.join(__dirname, '../../yt-dlp.exe')
             if (fs.existsSync(localBin)) ytDlpBinary = `"${localBin}"`
 
-            // Download video - using -S to ensure size stays reasonable for WhatsApp
-            const command = `${ytDlpBinary} -f "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/mp4" --output "${filePath.replace(/\\/g, '/')}" "${vid.url}"`
+            // Download video - using more compatible encoding and output format for WhatsApp
+            // -f mp4: select mp4 format
+            // --merge-output-format mp4: ensure combined file is mp4
+            // --postprocessor-args: force x264/aac for high compatibility
+            const command = `${ytDlpBinary} -f "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/mp4" --merge-output-format mp4 --postprocessor-args "ffmpeg:-vcodec libx264 -acodec aac -pix_fmt yuv420p" --output "${filePath.replace(/\\/g, '/')}" "${vid.url}"`
 
             console.log(`[VLT] Executing: ${command}`)
             await execPromise(command)
