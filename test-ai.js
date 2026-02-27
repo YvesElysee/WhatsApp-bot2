@@ -1,37 +1,35 @@
 require('dotenv').config()
-const axios = require('axios')
+const { GoogleGenerativeAI } = require('@google/generative-ai')
 
-async function testAllKeys() {
-    const keys = [
-        process.env.GEMINI_KEY_1,
-        process.env.GEMINI_KEY_2,
-        process.env.GEMINI_KEY_3,
-        process.env.GEMINI_KEY_4
-    ].filter(k => k)
+async function testGemini() {
+    console.log('--- FINAL DEBUG GEMINI ---')
+    const key = process.env.GEMINI_KEY_1
+    if (!key) return console.log('No GEMINI_KEY_1 found')
 
-    for (let i = 0; i < keys.length; i++) {
-        const key = keys[i]
-        console.log(`\n--- TESTING KEY ${i + 1} ---`)
+    const genAI = new GoogleGenerativeAI(key)
+    const models = [
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-lite-preview-02-05',
+        'gemini-1.5-flash',
+        'gemini-pro'
+    ]
+
+    for (const mName of models) {
         try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`
-            const res = await axios.get(url)
-            console.log(`Key ${i + 1} is VALID. Available models:`)
-            const models = res.data.models.map(m => m.name.replace('models/', ''))
-            console.log(models.slice(0, 10)) // Show first 10
+            console.log(`Testing model: ${mName}`)
+            const model = genAI.getGenerativeModel({ model: mName })
 
-            if (models.includes('gemini-1.5-flash')) {
-                console.log('Testing gemini-1.5-flash...')
-                const genUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`
-                const genRes = await axios.post(genUrl, {
-                    contents: [{ parts: [{ text: "Hello" }] }]
-                })
-                console.log('Gemini Response success!')
-            }
+            // Testing with role-based structure which is more robust
+            const result = await model.generateContent({
+                contents: [{ role: 'user', parts: [{ text: "Bonjour, comment vas-tu ?" }] }]
+            })
+            const response = await result.response
+            console.log(`Success with ${mName}:`, response.text())
+            return
         } catch (e) {
-            console.error(`Key ${i + 1} FAILED: ${e.response?.status} ${e.response?.statusText}`)
-            console.error('Error info:', e.response?.data?.error?.message || e.message)
+            console.error(`Failed ${mName}:`, e.message)
         }
     }
 }
 
-testAllKeys()
+testGemini()

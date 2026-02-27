@@ -7,18 +7,23 @@ module.exports = {
         const from = m.key.remoteJid
         if (global.db.games[from]) return reply('❌ Une partie est déjà en cours dans ce chat !')
 
-        const player1 = sock.decodeJid(m.key.participant || m.key.remoteJid)
-        let player2Jid = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
-        let isAI = false
+        const sender = sock.decodeJid(m.key.participant || m.key.remoteJid)
+        let player2 = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
 
-        if (!player2Jid || args.includes('solo') || args.includes('ia')) {
-            isAI = true
-            player2Jid = 'AI_BOT'
-        } else {
-            player2Jid = sock.decodeJid(player2Jid)
+        // --- Standardized Launch Flow ---
+        if (!args[0] && !player2) {
+            return reply(`🎮 *PUISSANCE 4* 🎮\n\nChoisissez votre mode :\n1️⃣ *.p4 solo* (contre l'IA)\n2️⃣ *.p4 @ami* (contre un ami)`)
         }
 
-        if (player1 === player2Jid) return reply('❌ Vous ne pouvez pas jouer contre vous-même.')
+        let isAI = false
+        if (args[0] === 'solo' || args[0] === 'ia' || !player2) {
+            isAI = true
+            player2 = 'AI_BOT'
+        } else {
+            player2 = sock.decodeJid(player2)
+        }
+
+        if (sender === player2) return reply('❌ Jouer contre soi-même ?')
 
         // Board 6 rows x 7 cols
         const rows = 6
@@ -75,7 +80,7 @@ module.exports = {
 
         global.db.games[from] = {
             type: 'puissance4',
-            players: [player1, player2Jid],
+            players: [sender, player2],
             symbols: ['🔴', '🟡'],
             turn: 0,
             board,
@@ -152,7 +157,7 @@ module.exports = {
             }
         }
 
-        const opponent = isAI ? '🤖 IA' : `@${player2Jid.split('@')[0]}`
-        reply(`🎮 *PUISSANCE 4* 🎮\n\n${renderBoard(board)}\n🔴 @${player1.split('@')[0]}\n🟡 ${opponent}\n\n👉 @${player1.split('@')[0]}, choisis une colonne (1-7) !`, { mentions: [player1, player2Jid] })
+        const opponent = isAI ? '🤖 IA' : `@${player2.split('@')[0]}`
+        reply(`🎮 *PUISSANCE 4* 🎮\n\n${renderBoard(board)}\n🔴 @${sender.split('@')[0]}\n🟡 ${opponent}\n\n👉 @${sender.split('@')[0]}, choisis une colonne (1-7) !`, { mentions: [sender, player2] })
     }
 }

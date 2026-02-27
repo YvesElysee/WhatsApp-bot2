@@ -128,6 +128,9 @@ module.exports = async (sock, m, chatUpdate) => {
         // if privateMode is ON: only owner and mods can use the bot (in groups or IB)
         if (global.db.settings.privateMode && !isOwner) return
 
+        // --- Bot Activity Check (Bot On/Off) ---
+        if (!global.db.settings.active && !isOwner && !m.text.startsWith('.bot')) return
+
         // --- Body Extraction ---
         let body = (msgType === 'conversation') ? msg.conversation :
             (msgType === 'imageMessage') ? msg.imageMessage.caption :

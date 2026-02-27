@@ -83,7 +83,8 @@ global.db = {
         chatbot: false,
         statusView: false,
         statusLike: false,
-        statusAntidelete: false
+        statusAntidelete: false,
+        active: true
     },
     mods: [],
     msgStore: new Map(),
@@ -114,14 +115,27 @@ global.getAIResponse = async (text, provider = 'auto') => {
             const index = (global.db.geminiIndex + i) % geminiKeys.length
             const key = geminiKeys[index]
             const genAI = new GoogleGenerativeAI(key)
-            const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro', 'gemini-1.5-flash-latest']
+
+            // Extensive list based on what we saw in tests
+            const models = [
+                'gemini-2.5-flash',
+                'gemini-2.5-pro',
+                'gemini-2.0-flash',
+                'gemini-2.0-flash-lite-preview-02-05',
+                'gemini-1.5-flash',
+                'gemini-1.5-flash-latest',
+                'gemini-pro'
+            ]
 
             for (const modelId of models) {
                 try {
                     console.log(`[AI-ROTATION] Trying Gemini SDK (${modelId}) with Key ${index + 1}`)
                     const model = genAI.getGenerativeModel({ model: modelId })
-                    const result = await model.generateContent(text)
-                    const out = result.response.text()
+                    const result = await model.generateContent({
+                        contents: [{ role: 'user', parts: [{ text }] }]
+                    })
+                    const response = await result.response
+                    const out = response.text()
                     if (out) {
                         global.db.geminiIndex = (index + 1) % geminiKeys.length
                         return out

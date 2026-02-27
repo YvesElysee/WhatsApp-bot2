@@ -5,120 +5,128 @@ module.exports = {
     commands: ['morpion', 'ttt', 'tic'],
     run: async (sock, m, args, { reply, isGroup }) => {
         const from = m.key.remoteJid
-        if (global.db.games[from]) return reply('❌ Une partie est déjà en cours dans ce chat ! Tapez `.stopgame` pour l\'arrêter.')
+        if (global.db.games[from]) return reply('❌ Une partie est déjà en cours ici !')
 
-        const player1 = sock.decodeJid(m.key.participant || m.key.remoteJid)
+        const sender = sock.decodeJid(m.key.participant || m.key.remoteJid)
+        let player2 = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
 
-        // Mode detection
-        let player2Jid = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
+        // --- Standardized Launch Flow ---
+        if (!args[0] && !player2) {
+            return reply(`🎮 *MORPION 10x10* 🎮\n\nChoisissez votre mode :\n1️⃣ *.morpion solo* (contre l'IA)\n2️⃣ *.morpion @ami* (contre un ami)`)
+        }
+
         let isAI = false
-
-        if (!player2Jid || args.includes('solo') || args.includes('ia')) {
+        if (args[0] === 'solo' || args[0] === 'ia' || !player2) {
             isAI = true
-            player2Jid = 'AI_BOT'
+            player2 = 'AI_BOT'
         } else {
-            player2Jid = sock.decodeJid(player2Jid)
+            player2 = sock.decodeJid(player2)
         }
 
-        if (player1 === player2Jid) return reply('❌ Vous ne pouvez pas jouer contre vous-même.')
+        if (sender === player2) return reply('❌ Jouer contre soi-même ? Vraiment ?')
 
-        const board = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣']
+        // 10x10 Board
+        const size = 10
+        const board = Array(size * size).fill('⬜')
 
-        const renderBoard = (b = board) => {
-            return `\n    ${b[0]} | ${b[1]} | ${b[2]}\n    ──────────\n    ${b[3]} | ${b[4]} | ${b[5]}\n    ──────────\n    ${b[6]} | ${b[7]} | ${b[8]}\n`
-        }
-
-        const checkWin = (b = board) => {
-            const wins = [
-                [0, 1, 2], [3, 4, 5], [6, 7, 8],
-                [0, 3, 6], [1, 4, 7], [2, 5, 8],
-                [0, 4, 8], [2, 4, 6]
-            ]
-            for (let w of wins) {
-                if (b[w[0]] === b[w[1]] && b[w[1]] === b[w[2]] && (b[w[0]] === '✖️' || b[w[0]] === '⭕')) return b[w[0]]
+        const renderBoard = (b) => {
+            let out = '  1 2 3 4 5 6 7 8 9 🔟\n'
+            for (let i = 0; i < size; i++) {
+                const row = b.slice(i * size, (i + 1) * size)
+                out += `${(i + 1) % 10}${row.join('')}\n`
             }
-            if (b.every(s => s === '✖️' || s === '⭕')) return 'tie'
+            return out
+        }
+
+        const checkWin = (b) => {
+            const winLen = 5
+            // Horizontal
+            for (let r = 0; r < size; r++) {
+                for (let c = 0; c <= size - winLen; c++) {
+                    const line = b.slice(r * size + c, r * size + c + winLen)
+                    if (line.every(v => v === '❌') || line.every(v => v === '⭕')) return line[0]
+                }
+            }
+            // Vertical
+            for (let c = 0; c < size; c++) {
+                for (let r = 0; r <= size - winLen; r++) {
+                    let symbols = []
+                    for (let i = 0; i < winLen; i++) symbols.push(b[(r + i) * size + c])
+                    if (symbols.every(v => v === '❌') || symbols.every(v => v === '⭕')) return symbols[0]
+                }
+            }
+            // Diagonal \
+            for (let r = 0; r <= size - winLen; r++) {
+                for (let c = 0; c <= size - winLen; c++) {
+                    let symbols = []
+                    for (let i = 0; i < winLen; i++) symbols.push(b[(r + i) * size + (c + i)])
+                    if (symbols.every(v => v === '❌') || symbols.every(v => v === '⭕')) return symbols[0]
+                }
+            }
+            // Diagonal /
+            for (let r = 0; r <= size - winLen; r++) {
+                for (let c = winLen - 1; c < size; c++) {
+                    let symbols = []
+                    for (let i = 0; i < winLen; i++) symbols.push(b[(r + i) * size + (c - i)])
+                    if (symbols.every(v => v === '❌') || symbols.every(v => v === '⭕')) return symbols[0]
+                }
+            }
+            if (b.every(v => v !== '⬜')) return 'tie'
             return null
         }
 
-        const aiMove = async (gameBoard) => {
-            const available = gameBoard.map((s, i) => (s !== '✖️' && s !== '⭕' ? i : null)).filter(i => i !== null)
-            // Win check
-            for (let i of available) {
-                let copy = [...gameBoard]
-                copy[i] = '⭕'
-                if (checkWin(copy) === '⭕') return i
-            }
-            // Block check
-            for (let i of available) {
-                let copy = [...gameBoard]
-                copy[i] = '✖️'
-                if (checkWin(copy) === '✖️') return i
-            }
-            // Random
-            return available[Math.floor(Math.random() * available.length)]
+        const aiMove = (b) => {
+            const empty = b.map((v, i) => v === '⬜' ? i : null).filter(v => v !== null)
+            // Simpler AI for large grid: prefer center-ish empty spots or random
+            return empty[Math.floor(Math.random() * empty.length)]
         }
 
         global.db.games[from] = {
             type: 'morpion',
-            players: [player1, player2Jid],
-            symbols: ['✖️', '⭕'],
-            turn: 0,
+            players: [sender, player2],
             board,
+            turn: 0,
             isAI,
-            lastUpdate: Date.now()
+            symbols: ['❌', '⭕']
         }
 
-        global.db.games[from].listener = async (sock, m, { body, sender, reply }) => {
+        global.db.games[from].listener = async (sock, m, { body, sender: mover }) => {
             const game = global.db.games[from]
-            if (!game || game.type !== 'morpion') return
+            if (!game || mover !== game.players[game.turn]) return
 
-            if (sender !== game.players[game.turn]) return
+            const pos = parseInt(body) - 1
+            if (isNaN(pos) || pos < 0 || pos > 99 || game.board[pos] !== '⬜') return
 
-            const move = parseInt(body) - 1
-            if (isNaN(move) || move < 0 || move > 8 || game.board[move] === '✖️' || game.board[move] === '⭕') return
+            game.board[pos] = game.symbols[game.turn]
+            let winner = checkWin(game.board)
 
-            game.board[move] = game.symbols[game.turn]
-            game.lastUpdate = Date.now()
-
-            let win = checkWin(game.board)
-
-            if (win) {
-                let msg = `🏆 *MORPION RESULTAT* 🏆\n${renderBoard(game.board)}\n`
-                if (win === 'tie') {
-                    msg += '🤝 *MATCH NUL !*'
-                } else {
-                    msg += `🎉 *VICTOIRE !* @${sender.split('@')[0]} a gagné !`
-                }
-                reply(msg, { mentions: [sender] })
+            if (winner) {
+                const resMsg = winner === 'tie' ? '🤝 *Match Nul !*' : `🎉 *Victoire de @${mover.split('@')[0]} !*`
+                reply(`🏆 *MORPION 10x10* 🏆\n${renderBoard(game.board)}\n${resMsg}`, { mentions: [mover] })
                 delete global.db.games[from]
                 return
             }
 
             game.turn = 1 - game.turn
 
-            if (game.isAI && game.players[game.turn] === 'AI_BOT') {
-                const aiIndex = await aiMove(game.board)
-                game.board[aiIndex] = game.symbols[game.turn]
-                win = checkWin(game.board)
+            if (game.isAI) {
+                const aiPos = aiMove(game.board)
+                game.board[aiPos] = game.symbols[1]
+                winner = checkWin(game.board)
 
-                if (win) {
-                    let msg = `🏆 *MORPION RESULTAT* 🏆\n${renderBoard(game.board)}\n`
-                    if (win === 'tie') msg += '🤝 *MATCH NUL !*'
-                    else msg += `🤖 *L'IA a gagné !* Retentez votre chance.`
-                    reply(msg)
+                if (winner) {
+                    const resMsg = winner === 'tie' ? '🤝 *Match Nul !*' : `🤖 *L'IA a gagné !*`
+                    reply(`🏆 *MORPION 10x10* 🏆\n${renderBoard(game.board)}\n${resMsg}`)
                     delete global.db.games[from]
                 } else {
-                    game.turn = 1 - game.turn
-                    reply(`🎮 *MORPION* 🎮\n${renderBoard(game.board)}\n🤖 L'IA a joué.\n👉 Au tour de @${game.players[game.turn].split('@')[0]} (✖️)`, { mentions: [game.players[game.turn]] })
+                    game.turn = 0
+                    reply(`🎮 *MORPION 10x10*\n${renderBoard(game.board)}\n🤖 L'IA a joué.\n👉 Au tour de @${game.players[0].split('@')[0]} (❌)`, { mentions: [game.players[0]] })
                 }
             } else {
-                let msg = `🎮 *MORPION* 🎮\n${renderBoard(game.board)}\n👉 Au tour de @${game.players[game.turn].split('@')[0]} (${game.symbols[game.turn]})`
-                reply(msg, { mentions: [game.players[game.turn]] })
+                reply(`🎮 *MORPION 10x10*\n${renderBoard(game.board)}\n👉 Au tour de @${game.players[game.turn].split('@')[0]} (${game.symbols[game.turn]})`, { mentions: [game.players[game.turn]] })
             }
         }
 
-        const opponent = isAI ? '🤖 IA' : `@${player2Jid.split('@')[0]}`
-        reply(`🎮 *DÉBUT DU MORPION* 🎮\n${renderBoard()}\n👤 @${player1.split('@')[0]} (✖️)\n👤 ${opponent} (⭕)\n\n👉 @${player1.split('@')[0]}, tapez un chiffre (1-9) !`, { mentions: [player1, player2Jid] })
+        reply(`🎮 *DÉBUT MORPION 10x10* 🎮\n${renderBoard(board)}\n👤 Joueur 1: @${sender.split('@')[0]}\n👤 Joueur 2: ${isAI ? '🤖 IA' : '@' + player2.split('@')[0]}\n\n👉 Tapez un chiffre entre **1 et 100** !`, { mentions: [sender, player2] })
     }
 }

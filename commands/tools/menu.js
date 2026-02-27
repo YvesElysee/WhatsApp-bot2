@@ -39,7 +39,7 @@ module.exports = {
         }
 
         menuText += `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `_Besoin d'aide ? Contactez mon créateur !_`
+            `_Besoin d'aide ? Contactez mon créateur ${creatorName}\n !_`
 
         reply(menuText.trim())
     }
