@@ -53,25 +53,7 @@ io.on('connection', (socket) => {
 
 const usePairingCode = process.env.PAIRING_NUMBER || ''
 
-// Global Database & Settings
-global.db = {
-    games: {},
-    settings: {
-        antidelete: false,
-        autoreact: false,
-        privateMode: false,
-        ibOnly: false,
-        aiOnly: false,
-        chatbot: false
-    },
-    mods: [],
-    msgStore: new Map(),
-    geminiIndex: 0
-}
-
-const { GoogleGenerativeAI } = require('@google/generative-ai')
-
-// Global Database & Settings
+// Initial Global Variables (will be merged with database later)
 global.db = {
     games: {},
     settings: {
@@ -205,9 +187,8 @@ setInterval(() => {
     const url = process.env.RENDER_EXTERNAL_URL || process.env.RENDER_URL
     if (url && axios) {
         axios.get(url).catch(() => { })
-        console.log('[ELY-PING] Aggressive keep-alive ping sent.')
     }
-}, 30000) // Increased to 30s to be less aggressive but still effective
+}, 60000) // 1 minute is enough for Render anti-sleep
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('session')

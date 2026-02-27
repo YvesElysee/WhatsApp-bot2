@@ -29,7 +29,7 @@
   "settings": {
     "antidelete": true,
     "autoreact": false,
-    "privateMode": true,
+    "privateMode": false,
     "ibOnly": false,
     "aiOnly": true,
     "chatbot": true,
