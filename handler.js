@@ -1,6 +1,16 @@
-const { getContentType } = require('@whiskeysockets/baileys')
+// Baileys v7 est ESM pur — getContentType est mis en cache dans global._baileysGetContentType
+// par index.js lors du démarrage via import() dynamique
+const { getBaileys } = require('./lib/baileys')
 const fs = require('fs')
 const path = require('path')
+
+// Résolution de getContentType : d'abord le cache global, sinon chargement dynamique
+const obtenirGetContentType = async () => {
+    if (global._baileysGetContentType) return global._baileysGetContentType
+    const baileys = await getBaileys()
+    global._baileysGetContentType = baileys.getContentType
+    return baileys.getContentType
+}
 
 // Registre de toutes les commandes chargées dynamiquement
 const commands = new Map()
@@ -54,6 +64,8 @@ const regexLien = /(https?:\/\/[^\s]+|www\.[^\s]+|chat\.whatsapp\.com\/[^\s]+)/g
 // GESTIONNAIRE PRINCIPAL DES MESSAGES
 // ─────────────────────────────────────────────────────────
 module.exports = async (sock, m, chatUpdate) => {
+    // Récupérer getContentType depuis le cache Baileys (chargé une seule fois)
+    const getContentType = await obtenirGetContentType()
     try {
         if (!m.message) return
 

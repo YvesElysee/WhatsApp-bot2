@@ -1,5 +1,6 @@
 require('./config')
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, jidDecode, proto, getContentType } = require('@whiskeysockets/baileys')
+// Baileys v7 est ESM pur — on utilise le wrapper d'import() dynamique
+const { getBaileys } = require('./lib/baileys')
 const pino = require('pino')
 const fs = require('fs')
 const path = require('path')
@@ -65,7 +66,6 @@ let botDemarre = false
 io.on('connection', (socket) => {
     socket.emit('status', connectionStatus)
     if (qrCodeData && connectionStatus !== 'open') socket.emit('qr', qrCodeData)
-
     socket.on('request-pairing', async (phone) => {
         process.emit('request-pairing', phone, socket)
     })
@@ -73,11 +73,10 @@ io.on('connection', (socket) => {
 
 // ─────────────────────────────────────────────────────────
 // BASE DE DONNÉES GLOBALE
-// Inclut le nouveau namespace "groups" pour la gestion des groupes
 // ─────────────────────────────────────────────────────────
 global.db = {
     jeux: {},
-    groups: {},       // Données de modération par groupe
+    groups: {},
     settings: {
         antidelete: false,
         autoreact: false,
@@ -91,20 +90,20 @@ global.db = {
         active: true
     },
     mods: [],
-    msgStore: new Map(),  // Stockage temporaire des messages (non persisté)
-    geminiIndex: 0        // Index de rotation des clés Gemini
+    msgStore: new Map(),
+    geminiIndex: 0
 }
 
 // Initialise les données d'un groupe s'il n'existe pas encore
 global.getGroupDB = (groupJid) => {
     if (!global.db.groups[groupJid]) {
         global.db.groups[groupJid] = {
-            antilink: false,          // Suppression automatique des liens
-            rules: [],                // Règles définies par l'admin via WhatsApp
-            warnLimit: 3,             // Nombre d'avertissements avant expulsion
-            warnings: {},             // Compteur d'avertissements par utilisateur
-            autoclose: null,          // Heure de fermeture automatique (HH:MM)
-            autoopen: null            // Heure d'ouverture automatique (HH:MM)
+            antilink: false,
+            rules: [],
+            warnLimit: 3,
+            warnings: {},
+            autoclose: null,
+            autoopen: null
         }
     }
     return global.db.groups[groupJid]
@@ -117,7 +116,6 @@ global.getGroupDB = (groupJid) => {
 global.getAIResponse = async (text, provider = 'auto') => {
     const nettoyer = (k) => (typeof k === 'string') ? k.trim() : ''
 
-    // Clés Gemini valides (commencent par AIza)
     const clefsGemini = [
         nettoyer(process.env.GEMINI_KEY_1),
         nettoyer(process.env.GEMINI_KEY_2),
@@ -125,21 +123,18 @@ global.getAIResponse = async (text, provider = 'auto') => {
         nettoyer(process.env.GEMINI_KEY_4)
     ].filter(k => k.length > 10 && k.startsWith('AIza'))
 
-    // Clés WisdomGate valides
     const clefsWG = [
         nettoyer(process.env.WISDOM_GATE_KEY_1),
         nettoyer(process.env.WISDOM_GATE_KEY_2)
     ].filter(k => k.length > 10 && !k.includes('votre_cle'))
 
-    // Clé OpenRouter (Meta AI gratuit)
     const cleOpenRouter = nettoyer(process.env.OPENROUTER_KEY)
 
     console.log(`[IA-DEBUG] Gemini:${clefsGemini.length} WG:${clefsWG.length} OpenRouter:${cleOpenRouter ? 'oui' : 'non'}`)
 
-    // ── Tentative via OpenRouter (Meta Llama-3 gratuit) ──
+    // ── OpenRouter — Meta Llama-3 (gratuit) ──
     const essayerOpenRouter = async () => {
         if (!cleOpenRouter) return null
-        // Modèles gratuits disponibles sur OpenRouter
         const modeles = [
             'meta-llama/llama-3.3-70b-instruct:free',
             'meta-llama/llama-3.1-8b-instruct:free',
@@ -155,11 +150,11 @@ global.getAIResponse = async (text, provider = 'auto') => {
         })
         for (const modele of modeles) {
             try {
-                console.log(`[IA-OPENROUTER] Essai du modèle ${modele}`)
+                console.log(`[IA-OPENROUTER] Essai ${modele}`)
                 const completion = await client.chat.completions.create({
                     model: modele,
                     messages: [
-                        { role: 'system', content: 'Tu es Ely, un assistant WhatsApp intelligent et sympathique. Réponds en français sauf si l\'utilisateur écrit dans une autre langue.' },
+                        { role: 'system', content: 'Tu es Ely, un assistant WhatsApp intelligent. Réponds en français sauf si l\'utilisateur écrit dans une autre langue.' },
                         { role: 'user', content: text }
                     ],
                     max_tokens: 1200
@@ -168,54 +163,47 @@ global.getAIResponse = async (text, provider = 'auto') => {
                 if (reponse) return reponse
             } catch (err) {
                 console.error(`[IA-OPENROUTER] Échec ${modele} : ${err.message}`)
-                if (err.status === 401 || err.status === 402) break // Clé invalide, on arrête
+                if (err.status === 401 || err.status === 402) break
             }
         }
         return null
     }
 
-    // ── Tentative via Google Gemini ──
+    // ── Google Gemini ──
     const essayerGemini = async () => {
         if (clefsGemini.length === 0) return null
         for (let i = 0; i < clefsGemini.length; i++) {
             const index = (global.db.geminiIndex + i) % clefsGemini.length
             const cle = clefsGemini[index]
             const genAI = new GoogleGenerativeAI(cle)
-            // Modèles Gemini à essayer dans l'ordre
             const modeles = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro']
             for (const modeleId of modeles) {
                 try {
-                    console.log(`[IA-GEMINI] Essai ${modeleId} Clé #${index + 1}`)
                     const modele = genAI.getGenerativeModel({ model: modeleId })
                     const resultat = await modele.generateContent({
                         contents: [{ role: 'user', parts: [{ text }] }]
                     })
-                    const reponse = await resultat.response
-                    const texte = reponse.text()
+                    const texte = (await resultat.response).text()
                     if (texte) {
-                        // Passer à la clé suivante pour équilibrer la charge
                         global.db.geminiIndex = (index + 1) % clefsGemini.length
                         return texte
                     }
                 } catch (e) {
-                    console.error(`[IA-GEMINI] Échec ${modeleId} Clé #${index + 1} : ${e.message}`)
+                    console.error(`[IA-GEMINI] Échec ${modeleId} : ${e.message}`)
                 }
             }
         }
         return null
     }
 
-    // ── Tentative via WisdomGate ──
+    // ── WisdomGate ──
     const essayerWisdomGate = async () => {
         if (clefsWG.length === 0) return null
         for (let i = 0; i < clefsWG.length; i++) {
             const index = (global.db.geminiIndex + i) % clefsWG.length
-            const cle = clefsWG[index]
-            const client = new OpenAI({ apiKey: cle, baseURL: 'https://wisdom-gate.juheapi.com/v1' })
-            const modeles = ['deepseek-r1', 'deepseek-v3.1-terminus', 'gpt-5-nano']
-            for (const modeleId of modeles) {
+            const client = new OpenAI({ apiKey: clefsWG[index], baseURL: 'https://wisdom-gate.juheapi.com/v1' })
+            for (const modeleId of ['deepseek-r1', 'deepseek-v3.1-terminus', 'gpt-5-nano']) {
                 try {
-                    console.log(`[IA-WG] Essai ${modeleId} Clé #${index + 1}`)
                     const completion = await client.chat.completions.create({
                         model: modeleId,
                         messages: [{ role: 'user', content: text }],
@@ -224,7 +212,7 @@ global.getAIResponse = async (text, provider = 'auto') => {
                     const reponse = completion.choices?.[0]?.message?.content
                     if (reponse) return reponse
                 } catch (err) {
-                    console.error(`[IA-WG] Échec ${modeleId} Clé #${index + 1} : ${err.message}`)
+                    console.error(`[IA-WG] Échec ${modeleId} : ${err.message}`)
                     if (err.status === 401 || err.status === 402) break
                 }
             }
@@ -232,78 +220,71 @@ global.getAIResponse = async (text, provider = 'auto') => {
         return null
     }
 
-    // Sélection du fournisseur IA selon la commande utilisée
+    // Sélection du fournisseur IA
     if (provider === 'gemini') {
-        const reponse = await essayerGemini()
-        if (reponse) return { out: reponse, provider: 'gemini' }
+        const r = await essayerGemini(); if (r) return { out: r, provider: 'gemini' }
     } else if (provider === 'meta' || provider === 'llama' || provider === 'openrouter') {
-        const reponse = await essayerOpenRouter()
-        if (reponse) return { out: reponse, provider: 'meta-llama' }
+        const r = await essayerOpenRouter(); if (r) return { out: r, provider: 'meta-llama' }
     } else if (provider === 'wisdom' || provider === 'wg') {
-        const reponse = await essayerWisdomGate()
-        if (reponse) return { out: reponse, provider: 'wisdomgate' }
+        const r = await essayerWisdomGate(); if (r) return { out: r, provider: 'wisdomgate' }
     } else {
         // Mode automatique : OpenRouter → Gemini → WisdomGate
-        const orReponse = await essayerOpenRouter()
-        if (orReponse) return { out: orReponse, provider: 'meta-llama' }
-
-        const geminiReponse = await essayerGemini()
-        if (geminiReponse) return { out: geminiReponse, provider: 'gemini' }
-
-        const wgReponse = await essayerWisdomGate()
-        if (wgReponse) return { out: wgReponse, provider: 'wisdomgate' }
+        const r1 = await essayerOpenRouter(); if (r1) return { out: r1, provider: 'meta-llama' }
+        const r2 = await essayerGemini(); if (r2) return { out: r2, provider: 'gemini' }
+        const r3 = await essayerWisdomGate(); if (r3) return { out: r3, provider: 'wisdomgate' }
     }
-
     return { error: 'TOUS_IA_ECHOUES' }
 }
-
-// Alias pour compatibilité avec l'ancien code
 global.getGeminiResponse = global.getAIResponse
 
 // ─────────────────────────────────────────────────────────
-// PLANIFICATEUR D'OUVERTURE/FERMETURE DES GROUPES
-// Vérifie chaque minute si un groupe doit être ouvert ou fermé
+// PLANIFICATEUR OUVERTURE/FERMETURE DES GROUPES
+// Vérifie toutes les minutes si un groupe doit changer d'état
 // ─────────────────────────────────────────────────────────
 let socketPlanificateur = null
 setInterval(async () => {
     if (!socketPlanificateur || connectionStatus !== 'open') return
     const maintenant = new Date()
-    const heureCourante = `${String(maintenant.getHours()).padStart(2, '0')}:${String(maintenant.getMinutes()).padStart(2, '0')}`
-
-    for (const [groupJid, donneesGroupe] of Object.entries(global.db.groups || {})) {
+    const heure = `${String(maintenant.getHours()).padStart(2, '0')}:${String(maintenant.getMinutes()).padStart(2, '0')}`
+    for (const [jid, grp] of Object.entries(global.db.groups || {})) {
         try {
-            // Fermeture automatique programmée
-            if (donneesGroupe.autoclose === heureCourante) {
-                await socketPlanificateur.groupSettingUpdate(groupJid, 'announcement')
-                await socketPlanificateur.sendMessage(groupJid, {
-                    text: '🔒 *Groupe fermé automatiquement.*\nSeuls les admins peuvent écrire maintenant.'
-                })
-                console.log(`[PLANIFICATEUR] Groupe ${groupJid} fermé à ${heureCourante}`)
+            if (grp.autoclose === heure) {
+                await socketPlanificateur.groupSettingUpdate(jid, 'announcement')
+                await socketPlanificateur.sendMessage(jid, { text: '🔒 *Groupe fermé automatiquement.* Seuls les admins peuvent écrire.' })
             }
-            // Ouverture automatique programmée
-            if (donneesGroupe.autoopen === heureCourante) {
-                await socketPlanificateur.groupSettingUpdate(groupJid, 'not_announcement')
-                await socketPlanificateur.sendMessage(groupJid, {
-                    text: '🔓 *Groupe ouvert automatiquement.*\nTout le monde peut écrire maintenant.'
-                })
-                console.log(`[PLANIFICATEUR] Groupe ${groupJid} ouvert à ${heureCourante}`)
+            if (grp.autoopen === heure) {
+                await socketPlanificateur.groupSettingUpdate(jid, 'not_announcement')
+                await socketPlanificateur.sendMessage(jid, { text: '🔓 *Groupe ouvert automatiquement.* Tout le monde peut écrire.' })
             }
-        } catch (e) {
-            console.error(`[PLANIFICATEUR-ERREUR] Groupe ${groupJid} :`, e.message)
-        }
+        } catch (e) { console.error(`[PLANIFICATEUR] ${jid} :`, e.message) }
     }
-}, 60000) // Vérification toutes les minutes
+}, 60000)
 
-// Ping anti-veille pour Render (évite l'endormissement du serveur)
+// Ping anti-veille pour Render
 setInterval(() => {
     const url = process.env.RENDER_EXTERNAL_URL || process.env.RENDER_URL
-    if (url && axios) axios.get(url).catch(() => { })
+    if (url) axios.get(url).catch(() => { })
 }, 60000)
 
 // ─────────────────────────────────────────────────────────
 // DÉMARRAGE DU BOT
+// Charge Baileys via import() dynamique pour compatibilité ESM/CJS
 // ─────────────────────────────────────────────────────────
 async function startBot() {
+    // Chargement du module Baileys ESM via le wrapper d'import() dynamique
+    const {
+        default: makeWASocket,
+        useMultiFileAuthState,
+        DisconnectReason,
+        fetchLatestBaileysVersion,
+        jidDecode,
+        proto,
+        getContentType
+    } = await getBaileys()
+
+    // Rendre getContentType accessible globalement pour le handler
+    global._baileysGetContentType = getContentType
+
     // Dossier de session : /tmp/session sur Vercel (éphémère), ./session en local
     const dossierSession = isVercel ? '/tmp/session' : 'session'
     const { state, saveCreds } = await useMultiFileAuthState(dossierSession)
@@ -323,7 +304,7 @@ async function startBot() {
 
     socketPlanificateur = sock
 
-    // Décodage propre des JIDs (identifiants WhatsApp)
+    // Décodage propre des JIDs WhatsApp
     sock.decodeJid = (jid) => {
         if (!jid) return jid
         if (/:\d+@/gi.test(jid)) {
@@ -335,11 +316,10 @@ async function startBot() {
 
     // Retransmettre un message vers un autre chat
     sock.copyNForward = async (jid, message, forceForward = false, options = {}) => {
-        let vtype
         if (options.readViewOnce) {
-            message.message = message.message?.ephemeralMessage?.message || message.message || undefined
-            vtype = Object.keys(message.message.viewOnceMessage.message)[0]
-            delete (message.message?.ignore || undefined)
+            message.message = message.message?.ephemeralMessage?.message || message.message
+            const vtype = Object.keys(message.message.viewOnceMessage.message)[0]
+            delete message.message?.ignore
             delete message.message.viewOnceMessage.message[vtype].viewOnce
             message.message = { ...message.message.viewOnceMessage.message }
         }
@@ -357,66 +337,51 @@ async function startBot() {
     // Gestion des événements de connexion
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update
-
         if (qr) {
             qrCodeData = await QRCode.toDataURL(qr)
             io.emit('qr', qrCodeData)
         }
-
         if (connection === 'close') {
             connectionStatus = 'close'
             botDemarre = false
             io.emit('status', 'close')
             const raison = new Boom(lastDisconnect?.error)?.output.statusCode
-
-            if (raison === DisconnectReason.badSession) {
-                console.log('[DÉCONNEXION] Session corrompue — supprimez le dossier session et reconnectez.')
-            } else if (raison === DisconnectReason.connectionReplaced) {
-                console.log('[DÉCONNEXION] Session remplacée — une autre session est active.')
-                process.exit()
+            if (raison === DisconnectReason.connectionReplaced) {
+                console.log('[DÉCONNEXION] Session remplacée.'); process.exit()
             } else if (raison === DisconnectReason.loggedOut) {
-                console.log('[DÉCONNEXION] Déconnecté — supprimez la session et reconnectez.')
-                process.exit()
+                console.log('[DÉCONNEXION] Déconnecté — supprimez la session.'); process.exit()
+            } else if (raison === DisconnectReason.badSession) {
+                console.log('[DÉCONNEXION] Session corrompue — supprimez le dossier session.')
             } else {
-                // Pour toutes les autres raisons, on tente de se reconnecter
-                console.log(`[DÉCONNEXION] Raison : ${raison} — reconnexion en cours...`)
+                console.log(`[DÉCONNEXION] Raison : ${raison} — reconnexion...`)
                 botDemarre = true
                 startBot()
             }
         } else if (connection === 'open') {
-            const botId = sock.user.id.split(':')[0]
-            console.log(`[BOT] Connecté en tant que ${botId}`)
+            console.log(`[BOT] Connecté en tant que ${sock.user.id.split(':')[0]}`)
             connectionStatus = 'open'
             botDemarre = true
             io.emit('status', 'open')
             qrCodeData = ''
-
-            // Message de bienvenue envoyé au propriétaire
             try {
-                const numeroProprietaire = global.owner[0].endsWith('@s.whatsapp.net')
+                const jidOwner = global.owner[0].endsWith('@s.whatsapp.net')
                     ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
-                await sock.sendMessage(numeroProprietaire, {
-                    text: '🤖 *Ely-bot connecté !*\n\n✅ Tous les systèmes sont opérationnels.\n\n📝 Tapez `.menu` pour commencer.\n🆕 Nouveau : `.grp` pour gérer vos groupes.\n🦙 Nouveau : `.meta` pour Meta AI (Llama-3) gratuit.'
+                await sock.sendMessage(jidOwner, {
+                    text: '🤖 *Ely-bot connecté !*\n\n✅ Tous les systèmes sont opérationnels.\n\n📝 Tapez `.menu` pour commencer.\n🦙 Nouveau : `.meta` pour Meta AI (Llama-3) gratuit.'
                 })
-            } catch (err) {
-                console.error('[BOT] Échec d\'envoi du message de bienvenue :', err.message)
-            }
+            } catch (err) { console.error('[BOT] Échec message de bienvenue :', err.message) }
         }
     })
 
-    // Gestionnaire de demande de code de jumelage
+    // Gestionnaire de code de jumelage
     process.on('request-pairing', async (phone, socket) => {
         if (!sock.authState.creds.registered) {
             try {
                 let code = await sock.requestPairingCode(phone)
                 code = code?.match(/.{1,4}/g)?.join('-') || code
                 socket.emit('pairing-code', code)
-            } catch (e) {
-                socket.emit('log', 'Erreur demande code : ' + e.message)
-            }
-        } else {
-            socket.emit('log', 'Déjà connecté !')
-        }
+            } catch (e) { socket.emit('log', 'Erreur code : ' + e.message) }
+        } else { socket.emit('log', 'Déjà connecté !') }
     })
 
     sock.ev.on('creds.update', saveCreds)
@@ -429,93 +394,64 @@ async function startBot() {
         try {
             if (!isVercel && fs.existsSync(cheminDB)) {
                 const data = JSON.parse(fs.readFileSync(cheminDB, 'utf-8'))
-                global.db = {
-                    ...global.db,
-                    ...data,
-                    groups: { ...(data.groups || {}) }
-                }
-                global.db.msgStore = new Map()  // Non persisté (trop lourd)
+                global.db = { ...global.db, ...data, groups: { ...(data.groups || {}) } }
+                global.db.msgStore = new Map()
                 global.db.geminiIndex = 0
-                console.log('[DB] Base de données chargée avec succès.')
+                console.log('[DB] Base de données chargée.')
             } else if (isVercel) {
-                console.log('[DB] Mode Vercel — base de données en mémoire uniquement.')
+                console.log('[DB] Mode Vercel — base en mémoire uniquement.')
             }
-        } catch (e) {
-            console.error('[DB] Erreur de chargement :', e)
-        }
+        } catch (e) { console.error('[DB] Erreur chargement :', e) }
     }
 
     const sauvegarderDB = () => {
-        if (isVercel) return // Pas d'écriture persistante possible sur Vercel
+        if (isVercel) return
         try {
             const donnees = { ...global.db }
-            delete donnees.msgStore // Ne pas sauvegarder le stockage de messages (trop lourd)
+            delete donnees.msgStore
             fs.writeFileSync(cheminDB, JSON.stringify(donnees, null, 2))
-        } catch (e) {
-            console.error('[DB] Erreur de sauvegarde :', e)
-        }
+        } catch (e) { console.error('[DB] Erreur sauvegarde :', e) }
     }
 
     chargerDB()
-    setInterval(sauvegarderDB, 30000) // Sauvegarde automatique toutes les 30 secondes
+    setInterval(sauvegarderDB, 30000)
 
     // Traitement des messages entrants
     sock.ev.on('messages.upsert', async chatUpdate => {
         try {
             if (chatUpdate.type !== 'notify' && chatUpdate.type !== 'append') return
-
             const maintenant = Date.now() / 1000
             for (const m of chatUpdate.messages) {
                 if (!m.message) continue
 
                 // Gestion des statuts WhatsApp
                 if (m.key?.remoteJid === 'status@broadcast') {
-                    const expediteur = sock.decodeJid(m.key.participant || m.key.remoteJid)
+                    const exp = sock.decodeJid(m.key.participant || m.key.remoteJid)
                     if (global.db.settings.statusView) await sock.readMessages([m.key])
                     if (global.db.settings.statusLike && !m.key.fromMe) {
-                        await sock.sendMessage('status@broadcast', {
-                            react: { text: '❤️', key: m.key }
-                        }, { statusJidList: [expediteur] })
+                        await sock.sendMessage('status@broadcast', { react: { text: '❤️', key: m.key } }, { statusJidList: [exp] })
                     }
-                    // Stockage du statut pour anti-suppression
-                    global.db.msgStore.set(m.key.id, {
-                        m, msg: m.message,
-                        type: getContentType(m.message),
-                        sender: expediteur,
-                        from: 'status@broadcast',
-                        isStatus: true
-                    })
+                    global.db.msgStore.set(m.key.id, { m, msg: m.message, type: getContentType(m.message), sender: exp, from: 'status@broadcast', isStatus: true })
                     continue
                 }
 
-                // Ignorer les vieux messages reçus à la reconnexion
+                // Ignorer les vieux messages reçus à la reconnexion (> 60s)
                 if (chatUpdate.type === 'notify' && (maintenant - m.messageTimestamp) > 60) continue
 
-                const expediteurJid = m.key.remoteJid
-                console.log(`[MSG] ${expediteurJid.split('@')[0]}: ${JSON.stringify(m.message).substring(0, 80)}`)
+                console.log(`[MSG] ${m.key.remoteJid.split('@')[0]}`)
 
-                // Passer le message au gestionnaire de commandes
-                handler(sock, m, chatUpdate).catch(err => {
-                    console.error('[ERREUR] Gestionnaire :', err)
-                })
+                // Passer le message au gestionnaire principal
+                handler(sock, m, chatUpdate).catch(err => console.error('[ERREUR] Handler :', err))
             }
-        } catch (err) {
-            console.error('[ERREUR] messages.upsert :', err)
-        }
+        } catch (err) { console.error('[ERREUR] messages.upsert :', err) }
     })
 
     return sock
 }
 
-// Démarrage automatique : immédiat en local, à la demande sur Vercel
-if (!isVercel) {
-    botDemarre = true
-    startBot()
-} else {
-    console.log('[VERCEL] Mode serverless — le bot démarre sur la première requête /api/start.')
-    botDemarre = true
-    startBot().catch(err => {
-        console.error('[VERCEL] Échec du démarrage automatique :', err.message)
-        botDemarre = false
-    })
-}
+// Démarrage : immédiat en local ou sur Render, à la demande sur Vercel
+botDemarre = true
+startBot().catch(err => {
+    console.error('[DEMARRAGE] Erreur critique :', err.message)
+    botDemarre = false
+})
