@@ -41,8 +41,14 @@ const loadCommands = (dir = commandsPath) => {
 loadCommands()
 console.log(`[ELY-SYSTEM] ${commands.size} commandes indexées.`)
 
-// AI Helpers are now global or passed via getAIResponse from index.js
+// ─────────────────────────────────────────────────────────
+// URL / Link detector regex
+// ─────────────────────────────────────────────────────────
+const linkRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|chat\.whatsapp\.com\/[^\s]+)/gi
 
+// ─────────────────────────────────────────────────────────
+// Main Handler
+// ─────────────────────────────────────────────────────────
 module.exports = async (sock, m, chatUpdate) => {
     try {
         if (!m.message) return
@@ -69,8 +75,6 @@ module.exports = async (sock, m, chatUpdate) => {
         const from = m.key.remoteJid
         const isGroup = from.endsWith('@g.us')
 
-        console.log(`[DEBUG] Extracting metadata for message type: ${msgType}`)
-
         const sender = sock.decodeJid(m.key.participant || m.key.remoteJid)
         if (!sender) return console.error('[DEBUG] Sender JID not found')
 
@@ -86,14 +90,13 @@ module.exports = async (sock, m, chatUpdate) => {
             }) ||
             m.key.fromMe
 
-        console.log(`[DEBUG] Metadata: sender=${senderId}, isOwner=${isOwner}, botNumber=${botNumber}`)
-
         // --- Message Storage (for Anti-Delete and Purge) ---
         if (msgType && msgType !== 'protocolMessage') {
             global.db.msgStore.set(m.key.id, { m, msg, type: msgType, sender, from })
             if (global.db.msgStore.size > 1000) global.db.msgStore.delete(global.db.msgStore.keys().next().value)
         }
 
+        // --- Anti-Delete Handler ---
         if (msgType === 'protocolMessage' && msg.protocolMessage.type === 0) {
             const cached = global.db.msgStore.get(msg.protocolMessage.key.id)
             if (cached && (global.db.settings.antidelete || (cached.isStatus && global.db.settings.statusAntidelete))) {
@@ -106,26 +109,18 @@ module.exports = async (sock, m, chatUpdate) => {
                     notificationText += `👤 @${cached.sender.split('@')[0]}\n📝 Message supprimé à l'instant.`
                 }
 
-                // Pour les statuts, on envoie toujours à l'owner
                 const target = cached.isStatus ? ownerNumber : (global.db.settings.privateMode ? ownerNumber : from)
-
                 await sock.sendMessage(target, { text: notificationText, mentions: [cached.sender] }, { quoted: cached.m })
                 await sock.copyNForward(target, cached.m, true)
 
-                if (cached.isStatus) {
-                    await sock.sendMessage(target, { text: `💡 *Info* : Le média ci-dessus est le contenu du statut supprimé. Vous pouvez l'enregistrer directement.` })
-                }
-
-                // Audit si ce n'est pas un statut et pas déjà envoyé à l'owner
                 if (!cached.isStatus && from !== ownerNumber && !global.db.settings.privateMode) {
-                    await sock.sendMessage(ownerNumber, { text: `🚨 *ANTI-DELETE (Audit)* 🚨\n\n📍 Groupe/Chat: ${from}\n👤 Auteur: @${cached.sender.split('@')[0]}`, mentions: [cached.sender] })
+                    await sock.sendMessage(ownerNumber, { text: `🚨 *ANTI-DELETE (Audit)*\n📍 Chat: ${from}\n👤 Auteur: @${cached.sender.split('@')[0]}`, mentions: [cached.sender] })
                     await sock.copyNForward(ownerNumber, cached.m, true)
                 }
             }
         }
 
-        // --- Private Mode Check ---
-        // if privateMode is ON: only owner and mods can use the bot (in groups or IB)
+        // --- Private Mode ---
         if (global.db.settings.privateMode && !isOwner) return
 
         // --- Body Extraction ---
@@ -139,8 +134,46 @@ module.exports = async (sock, m, chatUpdate) => {
 
         m.text = (body || '').trim()
 
-        // --- Bot Activity Check (Bot On/Off) ---
+        // --- Bot Activity Check ---
         if (!global.db.settings.active && !isOwner && !m.text.startsWith('.bot')) return
+
+        // ─────────────────────────────────────────────────────────
+        // GROUP PROTECTION HOOK (runs before command check)
+        // ─────────────────────────────────────────────────────────
+        if (isGroup && !m.key.fromMe && msgType !== 'protocolMessage') {
+            const grpData = global.getGroupDB ? global.getGroupDB(from) : null
+
+            if (grpData) {
+                // Fetch group metadata once for protection checks
+                let groupAdmins = []
+                let isSenderAdmin = false
+                try {
+                    const meta = await sock.groupMetadata(from).catch(() => null)
+                    if (meta) {
+                        groupAdmins = meta.participants
+                            .filter(p => p.admin !== null)
+                            .map(p => sock.decodeJid(p.id))
+                        isSenderAdmin = groupAdmins.includes(sender) || isOwner
+                    }
+                } catch (e) {
+                    isSenderAdmin = isOwner
+                }
+
+                // Anti-Link: delete messages with URLs from non-admins
+                if (grpData.antilink && !isSenderAdmin && m.text && linkRegex.test(m.text)) {
+                    linkRegex.lastIndex = 0 // Reset regex state
+                    try {
+                        await sock.sendMessage(from, { delete: m.key })
+                        const warnMsg = `⚠️ @${senderId} — Liens non autorisés dans ce groupe !\n\n_Merci de respecter les règles._`
+                        await sock.sendMessage(from, { text: warnMsg, mentions: [sender] })
+                        console.log(`[ANTILINK] Deleted link from ${senderId} in ${from}`)
+                    } catch (e) {
+                        console.error('[ANTILINK] Error:', e.message)
+                    }
+                    return // Stop processing this message
+                }
+            }
+        }
 
         // --- Reaction / Status Download Handler ---
         if (msgType === 'reactionMessage') {
@@ -149,7 +182,6 @@ module.exports = async (sock, m, chatUpdate) => {
             const isMe = key.fromMe
             const cached = global.db.msgStore.get(key.id)
 
-            // If I react to a status I viewed, download it
             if (isMe && cached && cached.isStatus) {
                 const ownerNumber = global.authorNum || (global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net')
                 await sock.sendMessage(ownerNumber, { text: `📥 *TÉLÉCHARGEMENT STATUT*\nDe : @${cached.sender.split('@')[0]}`, mentions: [cached.sender] })
@@ -202,6 +234,7 @@ module.exports = async (sock, m, chatUpdate) => {
                     }).catch(e => console.error('[DEBUG] Game listener error:', e))
                 }
             }
+
             if (global.db.settings.autoreact && m.text && !m.key.fromMe) {
                 const emojis = ['👍', '❤️', '🔥', '😂', '✨']
                 await sock.sendMessage(from, { react: { text: emojis[Math.floor(Math.random() * emojis.length)], key: m.key } })
@@ -212,7 +245,9 @@ module.exports = async (sock, m, chatUpdate) => {
 
             if (global.db.settings.chatbot && isMentioned && !m.key.fromMe) {
                 const aiResponse = await global.getAIResponse(m.text)
-                if (aiResponse) await sock.sendMessage(from, { text: `🤖 *ELY-CHATBOT* :\n\n${aiResponse}` }, { quoted: m })
+                if (aiResponse && aiResponse.out) {
+                    await sock.sendMessage(from, { text: `🤖 *ELY-AI* :\n\n${aiResponse.out}` }, { quoted: m })
+                }
             }
             return
         }
@@ -220,56 +255,76 @@ module.exports = async (sock, m, chatUpdate) => {
         // --- Command Execution ---
         const command = m.text.slice(1).trim().split(/ +/).shift().toLowerCase()
         const args = m.text.trim().split(/ +/).slice(1)
-        const text = args.join(" ")
+        const text = args.join(' ')
 
         const cmd = commands.get(command)
         if (!cmd) return
 
-        // --- Admin & Permissions (Improved) ---
+        // ─────────────────────────────────────────────────────────
+        // ADMIN CHECK — Fixed race condition with proper retry + backoff
+        // ─────────────────────────────────────────────────────────
         let isAdmins = false
         let isBotAdmins = false
         let groupOwner = ''
+
         if (isGroup) {
+            // Helper: fetch group metadata with retry
+            const fetchMeta = async (retries = 2, delay = 800) => {
+                for (let attempt = 0; attempt < retries; attempt++) {
+                    try {
+                        const meta = await sock.groupMetadata(from)
+                        if (meta && meta.participants && meta.participants.length > 0) return meta
+                    } catch (e) {
+                        console.warn(`[ADMIN-CHECK] Attempt ${attempt + 1} failed: ${e.message}`)
+                    }
+                    if (attempt < retries - 1) await new Promise(r => setTimeout(r, delay * (attempt + 1)))
+                }
+                return null
+            }
+
             try {
-                const groupMetadata = await sock.groupMetadata(from).catch(() => null)
+                const groupMetadata = await fetchMeta()
                 if (groupMetadata) {
                     const participants = groupMetadata.participants || []
-                    groupOwner = groupMetadata.owner || participants.find(p => p.admin === 'superadmin')?.id || ''
-                    const admins = participants.filter(v => v.admin !== null).map(v => sock.decodeJid(v.id))
-                    isAdmins = admins.includes(sender) || isOwner
-                    isBotAdmins = admins.includes(botNumber)
+                    groupOwner = groupMetadata.owner ||
+                        participants.find(p => p.admin === 'superadmin')?.id || ''
+
+                    // Build admin list: decode ALL participant JIDs properly
+                    const admins = participants
+                        .filter(v => v.admin !== null && v.admin !== undefined)
+                        .map(v => sock.decodeJid(v.id))
+
+                    const decodedSender = sock.decodeJid(sender)
+                    isAdmins = admins.includes(decodedSender) || isOwner
+                    isBotAdmins = botNumber ? admins.includes(botNumber) : false
+
+                    console.log(`[ADMIN-CHECK] sender=${decodedSender} isAdmins=${isAdmins} isBotAdmins=${isBotAdmins} admins=[${admins.join(',')}]`)
                 } else {
-                    // Fallback or retry if metadata is null
-                    console.log(`[ADMIN-CHECK] Failed to get metadata for ${from}, retrying once...`)
-                    const retryMetadata = await sock.groupMetadata(from).catch(() => null)
-                    if (retryMetadata) {
-                        const admins = retryMetadata.participants.filter(v => v.admin !== null).map(v => sock.decodeJid(v.id))
-                        isAdmins = admins.includes(sender) || isOwner
-                        isBotAdmins = admins.includes(botNumber)
-                    }
+                    console.warn('[ADMIN-CHECK] Could not fetch group metadata after retries — defaulting to isOwner for admin status')
+                    isAdmins = isOwner
                 }
             } catch (e) {
                 console.error('[ADMIN-CHECK-ERROR]', e)
+                isAdmins = isOwner
             }
         }
 
-        // Si l'utilisateur est administrateur WhatsApp, il doit être reconnu
+        // Owner is always admin
         if (isOwner) isAdmins = true
 
         // --- Target Protection ---
         const targetJid = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
         if (targetJid) {
             const decodedTarget = sock.decodeJid(targetJid)
-            const decodedSender = sock.decodeJid(sender)
             const isTargetOwner = global.owner.includes(decodedTarget.split('@')[0])
             const isTargetGroupOwner = decodedTarget === groupOwner
 
-            if ((isTargetOwner || isTargetGroupOwner) && !isOwner && decodedTarget !== decodedSender) {
-                return sock.sendMessage(from, { text: '❌ Action interdite : Vous ne pouvez pas utiliser de commandes contre le propriétaire.' }, { quoted: m })
+            if ((isTargetOwner || isTargetGroupOwner) && !isOwner && decodedTarget !== sock.decodeJid(sender)) {
+                return sock.sendMessage(from, { text: '❌ Action interdite : vous ne pouvez pas utiliser de commandes contre le propriétaire.' }, { quoted: m })
             }
         }
 
-        console.log(`[EXEC] .${command} from ${senderId}`)
+        console.log(`[EXEC] .${command} from ${senderId} | isAdmins=${isAdmins} isBotAdmins=${isBotAdmins}`)
 
         const ownerNumber = global.authorNum || (global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net')
         const smartReply = (content, options = {}) => {
@@ -280,9 +335,16 @@ module.exports = async (sock, m, chatUpdate) => {
 
         await cmd.run(sock, m, args, {
             reply: smartReply,
-            text, isAdmins, isBotAdmins, isGroup, commands, isOwner,
-            getAIResponse: global.getAIResponse, getGeminiResponse: global.getAIResponse,
-            groupOwner
+            text,
+            isAdmins,
+            isBotAdmins,
+            isGroup,
+            commands,
+            isOwner,
+            getAIResponse: global.getAIResponse,
+            getGeminiResponse: global.getAIResponse,
+            groupOwner,
+            getGroupDB: global.getGroupDB
         }).catch(e => {
             console.error(`[CMD ERROR] ${command}:`, e)
             sock.sendMessage(from, { text: `❌ Erreur : ${e.message || e}` }, { quoted: m })

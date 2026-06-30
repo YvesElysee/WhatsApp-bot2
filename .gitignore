@@ -4,3 +4,4 @@ session
 temp
 npm-debug.log
 .DS_Store
+*.log
