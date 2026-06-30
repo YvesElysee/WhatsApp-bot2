@@ -12,61 +12,66 @@ module.exports = {
 
         await reply('🔍 *Recherche en cours...*')
 
-        let vid
+        // Recherche de la vidéo sur YouTube
+        let video
         try {
-            const res = await yts(text)
-            vid = res.videos[0]
+            const resultats = await yts(text)
+            video = resultats.videos[0]
         } catch (e) {
-            return reply(`❌ Erreur de recherche : ${e.message}`)
+            return reply(`❌ Erreur de recherche YouTube : ${e.message}`)
         }
 
-        if (!vid) return reply('❌ Aucun résultat trouvé. Essayez avec d\'autres mots-clés.')
+        if (!video) return reply('❌ Aucun résultat trouvé. Essayez avec d\'autres mots-clés.')
 
-        const msgText =
+        // Message d'information sur la vidéo trouvée
+        const infoTexte =
             `🎵 *ELY MUSIC PLAYER* 🎵\n\n` +
-            `📌 *Titre :* ${vid.title}\n` +
-            `🕒 *Durée :* ${vid.timestamp}\n` +
-            `👀 *Vues :* ${Number(vid.views).toLocaleString('fr-FR')}\n` +
-            `🔗 *Lien :* ${vid.url}\n\n` +
+            `📌 *Titre :* ${video.title}\n` +
+            `🕒 *Durée :* ${video.timestamp}\n` +
+            `👀 *Vues :* ${Number(video.views).toLocaleString('fr-FR')}\n` +
+            `🔗 *Lien :* ${video.url}\n\n` +
             `📥 _Téléchargement en cours..._`
 
+        // Afficher la miniature avec les informations
         try {
             await sock.sendMessage(m.key.remoteJid, {
-                image: { url: vid.thumbnail },
-                caption: msgText
+                image: { url: video.thumbnail },
+                caption: infoTexte
             }, { quoted: m })
         } catch (e) {
-            await reply(msgText)
+            // Si l'image échoue, envoyer juste le texte
+            await reply(infoTexte)
         }
 
-        // ── Download using @distube/ytdl-core (works on Vercel/serverless) ──
         const from = m.key.remoteJid
-        const tmpDir = global.tempDir || '/tmp'
-        const fileName = `ely_play_${Date.now()}.mp3`
-        const filePath = path.join(tmpDir, fileName)
+        // Utiliser /tmp sur Vercel (seul dossier accessible en écriture), sinon ./temp
+        const dossierTemp = global.tempDir || '/tmp'
+        const nomFichier = `ely_play_${Date.now()}.mp3`
+        const cheminFichier = path.join(dossierTemp, nomFichier)
+        const estVercel = !!process.env.VERCEL || !!process.env.VERCEL_ENV
 
         try {
             const ytdl = require('@distube/ytdl-core')
 
-            // Check if URL is playable
-            if (!ytdl.validateURL(vid.url)) {
-                throw new Error('URL YouTube invalide ou vidéo non disponible.')
+            // Vérifier que l'URL est valide avant de télécharger
+            if (!ytdl.validateURL(video.url)) {
+                throw new Error('URL YouTube invalide ou vidéo non disponible dans votre région.')
             }
 
-            // Check video duration (avoid downloading very long videos)
-            const info = await ytdl.getInfo(vid.url).catch(() => null)
-            if (info) {
-                const durationSec = parseInt(info.videoDetails.lengthSeconds || 0)
-                if (durationSec > 600) { // 10 minutes max
-                    return reply(`⚠️ Vidéo trop longue (${Math.floor(durationSec / 60)} min).\nLimite : 10 minutes pour éviter les timeouts.`)
+            // Récupérer les informations de la vidéo pour vérifier la durée
+            const infos = await ytdl.getInfo(video.url).catch(() => null)
+            if (infos) {
+                const dureeSecondes = parseInt(infos.videoDetails.lengthSeconds || 0)
+                if (dureeSecondes > 600) { // Limite de 10 minutes pour éviter les timeouts
+                    return reply(`⚠️ Vidéo trop longue (${Math.floor(dureeSecondes / 60)} min).\n_Limite : 10 minutes pour éviter les timeouts serveur._`)
                 }
             }
 
-            // Stream to file
+            // Téléchargement via stream audio (évite de charger la vidéo entière)
             await new Promise((resolve, reject) => {
-                const stream = ytdl(vid.url, {
-                    filter: 'audioonly',
-                    quality: 'highestaudio',
+                const stream = ytdl(video.url, {
+                    filter: 'audioonly',      // Audio uniquement
+                    quality: 'highestaudio',  // Meilleure qualité audio disponible
                     requestOptions: {
                         headers: {
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
@@ -74,84 +79,88 @@ module.exports = {
                     }
                 })
 
-                const writeStream = fs.createWriteStream(filePath)
-                stream.pipe(writeStream)
+                const fluxEcriture = fs.createWriteStream(cheminFichier)
+                stream.pipe(fluxEcriture)
 
                 stream.on('error', reject)
-                writeStream.on('error', reject)
-                writeStream.on('finish', resolve)
+                fluxEcriture.on('error', reject)
+                fluxEcriture.on('finish', resolve)
 
-                // Timeout safety (2 minutes)
+                // Timeout de sécurité : 2 minutes maximum pour le téléchargement
                 const timeout = setTimeout(() => {
                     stream.destroy()
-                    reject(new Error('Timeout : téléchargement trop lent.'))
+                    reject(new Error('Délai dépassé : téléchargement trop lent.'))
                 }, 120000)
 
-                writeStream.on('finish', () => clearTimeout(timeout))
+                fluxEcriture.on('finish', () => clearTimeout(timeout))
             })
 
-            if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
-                throw new Error('Fichier audio vide ou non créé.')
+            // Vérifier que le fichier a bien été créé et n'est pas vide
+            if (!fs.existsSync(cheminFichier) || fs.statSync(cheminFichier).size === 0) {
+                throw new Error('Fichier audio vide ou non créé après téléchargement.')
             }
 
+            // Envoyer le fichier audio sur WhatsApp
             await sock.sendMessage(from, {
-                audio: fs.readFileSync(filePath),
+                audio: fs.readFileSync(cheminFichier),
                 mimetype: 'audio/mp4',
                 ptt: false,
-                fileName: `${vid.title.substring(0, 50)}.mp3`
+                fileName: `${video.title.substring(0, 50)}.mp3`
             }, { quoted: m })
 
-            console.log(`[PLAY] ✅ Sent: ${vid.title}`)
-        } catch (e) {
-            console.error('[PLAY ERROR]', e.message)
+            console.log(`[PLAY] ✅ Audio envoyé : ${video.title}`)
 
-            // Try yt-dlp as fallback (local/non-Vercel only)
-            const isVercel = !!process.env.VERCEL || !!process.env.VERCEL_ENV
-            if (!isVercel) {
+        } catch (erreurPrincipale) {
+            console.error('[PLAY ERREUR]', erreurPrincipale.message)
+
+            // Tentative de fallback avec yt-dlp (uniquement en local, pas sur Vercel)
+            if (!estVercel) {
                 try {
                     const { exec } = require('child_process')
                     const util = require('util')
                     const execPromise = util.promisify(exec)
 
-                    let ytDlpBinary = 'yt-dlp'
-                    const localBin = path.join(__dirname, '../../yt-dlp.exe')
-                    if (fs.existsSync(localBin)) ytDlpBinary = `"${localBin}"`
+                    // Chercher le binaire yt-dlp (local ou système)
+                    let binYtDlp = 'yt-dlp'
+                    const binLocal = path.join(__dirname, '../../yt-dlp.exe')
+                    if (fs.existsSync(binLocal)) binYtDlp = `"${binLocal}"`
 
-                    const cmd = `${ytDlpBinary} -x --audio-format mp3 --audio-quality 0 --output "${filePath.replace(/\\/g, '/')}" "${vid.url}"`
+                    const cmd = `${binYtDlp} -x --audio-format mp3 --audio-quality 0 --output "${cheminFichier.replace(/\\/g, '/')}" "${video.url}"`
                     await execPromise(cmd)
 
-                    if (fs.existsSync(filePath)) {
+                    if (fs.existsSync(cheminFichier)) {
                         await sock.sendMessage(from, {
-                            audio: fs.readFileSync(filePath),
+                            audio: fs.readFileSync(cheminFichier),
                             mimetype: 'audio/mp4',
                             ptt: false,
-                            fileName: `${vid.title.substring(0, 50)}.mp3`
+                            fileName: `${video.title.substring(0, 50)}.mp3`
                         }, { quoted: m })
-                        console.log(`[PLAY] ✅ yt-dlp fallback success: ${vid.title}`)
+                        console.log(`[PLAY] ✅ yt-dlp fallback réussi : ${video.title}`)
                     } else {
                         throw new Error('yt-dlp : fichier non créé.')
                     }
-                } catch (ytdlpErr) {
-                    console.error('[PLAY] yt-dlp fallback failed:', ytdlpErr.message)
+                } catch (erreurYtDlp) {
+                    console.error('[PLAY] yt-dlp fallback échoué :', erreurYtDlp.message)
                     return reply(
                         `❌ *Échec du téléchargement*\n\n` +
-                        `_${e.message}_\n\n` +
-                        `🔗 Téléchargez manuellement :\n${vid.url}`
+                        `_${erreurPrincipale.message}_\n\n` +
+                        `🔗 Écoutez directement sur YouTube :\n${video.url}`
                     )
                 }
             } else {
+                // Sur Vercel, proposer le lien direct en alternative
                 return reply(
                     `❌ *Téléchargement impossible sur Vercel*\n\n` +
-                    `_${e.message}_\n\n` +
-                    `🔗 Utilisez ce lien pour écouter :\n${vid.url}\n\n` +
-                    `💡 _Pour les téléchargements, hébergez le bot sur Render ou Railway._`
+                    `_${erreurPrincipale.message}_\n\n` +
+                    `🔗 Écoutez sur YouTube :\n${video.url}\n\n` +
+                    `💡 _Pour les téléchargements, hébergez sur Render ou Railway._`
                 )
             }
         } finally {
-            // Cleanup temp file
+            // Nettoyage du fichier temporaire dans tous les cas
             try {
-                if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
-            } catch (e) { }
+                if (fs.existsSync(cheminFichier)) fs.unlinkSync(cheminFichier)
+            } catch (e) { /* Ignorer les erreurs de nettoyage */ }
         }
     }
 }
