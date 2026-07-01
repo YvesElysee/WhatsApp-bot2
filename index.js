@@ -40,7 +40,8 @@ app.use(express.static(path.join(__dirname, 'public')))
 app.get('/health', (req, res) => res.json({
     status: 'ok',
     bot: 'Ely-bot',
-    connecte: connectionStatus === 'open'
+    connecte: connectionStatus === 'open',
+    owner: global.owner?.[0] || 'non défini'
 }))
 
 // Démarrage manuel du bot (utile pour Vercel au premier démarrage)
@@ -128,17 +129,23 @@ global.getAIResponse = async (text, provider = 'auto') => {
         nettoyer(process.env.WISDOM_GATE_KEY_2)
     ].filter(k => k.length > 10 && !k.includes('votre_cle'))
 
+    // ── OpenRouter : accepte sk-or-v1-... (ne PAS filtrer par startsWith)
     const cleOpenRouter = nettoyer(process.env.OPENROUTER_KEY)
+    const openRouterValide = cleOpenRouter.length > 10
 
-    console.log(`[IA-DEBUG] Gemini:${clefsGemini.length} WG:${clefsWG.length} OpenRouter:${cleOpenRouter ? 'oui' : 'non'}`)
+    console.log(`[IA-DEBUG] Gemini:${clefsGemini.length} WG:${clefsWG.length} OpenRouter:${openRouterValide ? 'OUI('+cleOpenRouter.substring(0,12)+'...)' : 'NON'}`)
 
     // ── OpenRouter — Meta Llama-3 (gratuit) ──
     const essayerOpenRouter = async () => {
-        if (!cleOpenRouter) return null
+        if (!openRouterValide) {
+            console.log('[IA-OPENROUTER] Clé manquante ou invalide, saut.')
+            return null
+        }
         const modeles = [
             'meta-llama/llama-3.3-70b-instruct:free',
             'meta-llama/llama-3.1-8b-instruct:free',
-            'mistralai/mistral-7b-instruct:free'
+            'mistralai/mistral-7b-instruct:free',
+            'deepseek/deepseek-r1:free'
         ]
         const client = new OpenAI({
             apiKey: cleOpenRouter,
@@ -150,7 +157,7 @@ global.getAIResponse = async (text, provider = 'auto') => {
         })
         for (const modele of modeles) {
             try {
-                console.log(`[IA-OPENROUTER] Essai ${modele}`)
+                console.log(`[IA-OPENROUTER] Essai modèle: ${modele}`)
                 const completion = await client.chat.completions.create({
                     model: modele,
                     messages: [
@@ -160,10 +167,18 @@ global.getAIResponse = async (text, provider = 'auto') => {
                     max_tokens: 1200
                 })
                 const reponse = completion.choices?.[0]?.message?.content
-                if (reponse) return reponse
+                if (reponse && reponse.trim().length > 0) {
+                    console.log(`[IA-OPENROUTER] Succès avec ${modele}`)
+                    return reponse
+                }
             } catch (err) {
                 console.error(`[IA-OPENROUTER] Échec ${modele} : ${err.message}`)
-                if (err.status === 401 || err.status === 402) break
+                // Seulement arrêter si c'est une erreur d'auth (401/402)
+                if (err.status === 401 || err.status === 402) {
+                    console.error('[IA-OPENROUTER] Erreur d\'authentification, vérifiez OPENROUTER_KEY')
+                    break
+                }
+                // Pour les autres erreurs, essayer le modèle suivant
             }
         }
         return null
@@ -239,7 +254,6 @@ global.getGeminiResponse = global.getAIResponse
 
 // ─────────────────────────────────────────────────────────
 // PLANIFICATEUR OUVERTURE/FERMETURE DES GROUPES
-// Vérifie toutes les minutes si un groupe doit changer d'état
 // ─────────────────────────────────────────────────────────
 let socketPlanificateur = null
 setInterval(async () => {
@@ -260,18 +274,16 @@ setInterval(async () => {
     }
 }, 60000)
 
-// Ping anti-veille pour Render
+// Ping anti-veille pour Render / keep-alive général
 setInterval(() => {
     const url = process.env.RENDER_EXTERNAL_URL || process.env.RENDER_URL
-    if (url) axios.get(url).catch(() => { })
-}, 60000)
+    if (url) axios.get(`${url}/health`).catch(() => { })
+}, 45000)
 
 // ─────────────────────────────────────────────────────────
 // DÉMARRAGE DU BOT
-// Charge Baileys via import() dynamique pour compatibilité ESM/CJS
 // ─────────────────────────────────────────────────────────
 async function startBot() {
-    // Chargement du module Baileys ESM via le wrapper d'import() dynamique
     const {
         default: makeWASocket,
         useMultiFileAuthState,
@@ -279,14 +291,18 @@ async function startBot() {
         fetchLatestBaileysVersion,
         jidDecode,
         proto,
-        getContentType
+        getContentType,
+        makeCacheableSignalKeyStore,
+        Browsers
     } = await getBaileys()
 
     // Rendre getContentType accessible globalement pour le handler
     global._baileysGetContentType = getContentType
 
-    // Dossier de session : /tmp/session sur Vercel (éphémère), ./session en local
-    const dossierSession = isVercel ? '/tmp/session' : 'session'
+    // Dossier de session stable
+    const dossierSession = isVercel ? '/tmp/session' : path.join(__dirname, 'session')
+    if (!fs.existsSync(dossierSession)) fs.mkdirSync(dossierSession, { recursive: true })
+
     const { state, saveCreds } = await useMultiFileAuthState(dossierSession)
     const { version } = await fetchLatestBaileysVersion()
 
@@ -295,11 +311,17 @@ async function startBot() {
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
         auth: state,
-        browser: ['Ubuntu', 'Chrome', '20.0.04'],
+        // Imite WhatsApp Desktop pour une session plus stable
+        browser: Browsers ? Browsers.ubuntu('Chrome') : ['Ubuntu', 'Chrome', '124.0.0'],
         syncFullHistory: false,
         shouldSyncHistoryMessage: () => false,
         markOnlineOnConnect: true,
         generateHighQualityLinkPreview: false,
+        // Keepalive pour éviter les déconnexions
+        keepAliveIntervalMs: 30000,
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 60000,
+        retryRequestDelayMs: 2000,
     })
 
     socketPlanificateur = sock
@@ -345,29 +367,54 @@ async function startBot() {
             connectionStatus = 'close'
             botDemarre = false
             io.emit('status', 'close')
-            const raison = new Boom(lastDisconnect?.error)?.output.statusCode
-            if (raison === DisconnectReason.connectionReplaced) {
-                console.log('[DÉCONNEXION] Session remplacée.'); process.exit()
-            } else if (raison === DisconnectReason.loggedOut) {
-                console.log('[DÉCONNEXION] Déconnecté — supprimez la session.'); process.exit()
-            } else if (raison === DisconnectReason.badSession) {
-                console.log('[DÉCONNEXION] Session corrompue — supprimez le dossier session.')
+            const statusCode = new Boom(lastDisconnect?.error)?.output?.statusCode
+            console.log(`[DÉCONNEXION] Code de statut: ${statusCode}`)
+
+            if (statusCode === DisconnectReason.connectionReplaced) {
+                console.log('[DÉCONNEXION] Session remplacée sur un autre appareil.'); process.exit(0)
+            } else if (statusCode === DisconnectReason.loggedOut) {
+                console.log('[DÉCONNEXION] Déconnecté manuellement — supprimez le dossier session.')
+                // Ne pas redémarrer si déconnexion volontaire
+            } else if (statusCode === DisconnectReason.badSession) {
+                console.log('[DÉCONNEXION] Session corrompue — suppression et redémarrage...')
+                try {
+                    fs.rmSync(dossierSession, { recursive: true, force: true })
+                    fs.mkdirSync(dossierSession, { recursive: true })
+                } catch (e) { }
+                setTimeout(() => { botDemarre = true; startBot() }, 5000)
             } else {
-                console.log(`[DÉCONNEXION] Raison : ${raison} — reconnexion...`)
-                botDemarre = true
-                startBot()
+                // Reconnexion automatique avec délai croissant
+                const delai = statusCode === 408 ? 10000 : 5000
+                console.log(`[DÉCONNEXION] Reconnexion dans ${delai/1000}s...`)
+                setTimeout(() => { botDemarre = true; startBot() }, delai)
             }
         } else if (connection === 'open') {
-            console.log(`[BOT] Connecté en tant que ${sock.user.id.split(':')[0]}`)
             connectionStatus = 'open'
             botDemarre = true
             io.emit('status', 'open')
             qrCodeData = ''
+
+            // ── OWNER DYNAMIQUE : lire le numéro réel de la session ──
+            const jidConnecte = sock.user?.id ? sock.decodeJid(sock.user.id) : null
+            if (jidConnecte) {
+                const numeroConnecte = jidConnecte.split('@')[0]
+                // Si pas de OWNER_NUMBER dans .env, utiliser le numéro de la session
+                if (!process.env.OWNER_NUMBER || global.owner[0] === '') {
+                    global.owner = [numeroConnecte]
+                    console.log(`[OWNER] Numéro détecté automatiquement : ${numeroConnecte}`)
+                } else {
+                    console.log(`[OWNER] Numéro depuis .env : ${global.owner[0]}`)
+                }
+                global.authorNum = jidConnecte
+            }
+
+            console.log(`[BOT] ✅ Connecté en tant que ${sock.user?.id?.split(':')[0]} | Owner: ${global.owner[0]}`)
+
             try {
                 const jidOwner = global.owner[0].endsWith('@s.whatsapp.net')
                     ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
                 await sock.sendMessage(jidOwner, {
-                    text: '🤖 *Ely-bot connecté !*\n\n✅ Tous les systèmes sont opérationnels.\n\n📝 Tapez `.menu` pour commencer.\n🦙 Nouveau : `.meta` pour Meta AI (Llama-3) gratuit.'
+                    text: `🤖 *Ely-bot connecté !*\n\n✅ Tous les systèmes sont opérationnels.\n📱 Numéro : ${global.owner[0]}\n\n📝 Tapez \`.menu\` pour commencer.\n🦙 Tapez \`.meta\` pour Meta AI (Llama-3) gratuit.`
                 })
             } catch (err) { console.error('[BOT] Échec message de bienvenue :', err.message) }
         }
@@ -387,7 +434,7 @@ async function startBot() {
     sock.ev.on('creds.update', saveCreds)
     sock.public = true
 
-    // ── Persistance de la base de données (désactivée sur Vercel) ──
+    // ── Persistance de la base de données ──
     const cheminDB = path.join(__dirname, 'database.json')
 
     const chargerDB = () => {
@@ -415,6 +462,21 @@ async function startBot() {
 
     chargerDB()
     setInterval(sauvegarderDB, 30000)
+
+    // ── Mémoriser les groupes pour les commandes par nom ──
+    // Met à jour la liste des groupes périodiquement
+    const mettreAJourGroupes = async () => {
+        if (connectionStatus !== 'open') return
+        try {
+            const groupes = await sock.groupFetchAllParticipating()
+            global.db.groupsCache = groupes  // { [jid]: { id, subject, ... } }
+            console.log(`[GROUPES] ${Object.keys(groupes).length} groupes en cache.`)
+        } catch (e) {
+            console.warn('[GROUPES] Échec mise à jour cache :', e.message)
+        }
+    }
+    setTimeout(mettreAJourGroupes, 10000)
+    setInterval(mettreAJourGroupes, 600000) // toutes les 10 minutes
 
     // Traitement des messages entrants
     sock.ev.on('messages.upsert', async chatUpdate => {
@@ -449,7 +511,7 @@ async function startBot() {
     return sock
 }
 
-// Démarrage : immédiat en local ou sur Render, à la demande sur Vercel
+// Démarrage immédiat
 botDemarre = true
 startBot().catch(err => {
     console.error('[DEMARRAGE] Erreur critique :', err.message)

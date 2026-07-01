@@ -1,10 +1,9 @@
 // Baileys v7 est ESM pur — getContentType est mis en cache dans global._baileysGetContentType
-// par index.js lors du démarrage via import() dynamique
 const { getBaileys } = require('./lib/baileys')
 const fs = require('fs')
 const path = require('path')
 
-// Résolution de getContentType : d'abord le cache global, sinon chargement dynamique
+// Résolution de getContentType : cache global d'abord, sinon chargement dynamique
 const obtenirGetContentType = async () => {
     if (global._baileysGetContentType) return global._baileysGetContentType
     const baileys = await getBaileys()
@@ -18,7 +17,6 @@ const cheminCommandes = path.join(__dirname, 'commands')
 
 // ─────────────────────────────────────────────────────────
 // CHARGEUR DE COMMANDES (récursif)
-// Parcourt tous les dossiers et charge chaque fichier .js
 // ─────────────────────────────────────────────────────────
 const chargerCommandes = (dossier = cheminCommandes) => {
     try {
@@ -29,18 +27,16 @@ const chargerCommandes = (dossier = cheminCommandes) => {
             const stat = fs.statSync(cheminComplet)
 
             if (stat.isDirectory()) {
-                chargerCommandes(cheminComplet) // Récursion dans les sous-dossiers
+                chargerCommandes(cheminComplet)
             } else if (fichier.endsWith('.js')) {
                 try {
                     delete require.cache[require.resolve(cheminComplet)]
                     const module = require(cheminComplet)
                     if (module.commands && Array.isArray(module.commands)) {
-                        // Le module déclare plusieurs alias (ex: ['play', 'mp3', 'music'])
                         for (const nomCmd of module.commands) {
                             commands.set(nomCmd, module)
                         }
                     } else {
-                        // Le module déclare un seul nom
                         const nom = module.name || fichier.replace('.js', '')
                         commands.set(nom, module)
                     }
@@ -57,19 +53,18 @@ const chargerCommandes = (dossier = cheminCommandes) => {
 chargerCommandes()
 console.log(`[ELY-SYSTÈME] ${commands.size} commandes indexées.`)
 
-// Détection des URLs et liens dans les messages
+// Détection des URLs et liens
 const regexLien = /(https?:\/\/[^\s]+|www\.[^\s]+|chat\.whatsapp\.com\/[^\s]+)/gi
 
 // ─────────────────────────────────────────────────────────
 // GESTIONNAIRE PRINCIPAL DES MESSAGES
 // ─────────────────────────────────────────────────────────
 module.exports = async (sock, m, chatUpdate) => {
-    // Récupérer getContentType depuis le cache Baileys (chargé une seule fois)
     const getContentType = await obtenirGetContentType()
     try {
         if (!m.message) return
 
-        // --- Déballage du message (gère les messages éphémères et vue unique) ---
+        // --- Déballage du message ---
         let msg = m.message
         let typeMsg = getContentType(msg)
 
@@ -94,19 +89,25 @@ module.exports = async (sock, m, chatUpdate) => {
         const expediteur = sock.decodeJid(m.key.participant || m.key.remoteJid)
         if (!expediteur) return console.error('[DEBUG] JID expéditeur introuvable')
 
+        // Numéro du bot (format: 1234567890@s.whatsapp.net)
         const numeroBot = (sock.user?.id) ? sock.decodeJid(sock.user.id) : null
         const idExpediteur = expediteur.split('@')[0]
 
-        // Vérification si l'expéditeur est le propriétaire ou un modérateur
+        // ─────────────────────────────────────────────────────────
+        // VÉRIFICATION OWNER : compare le numéro de la session
+        // global.owner est mis à jour dynamiquement dans index.js
+        // ─────────────────────────────────────────────────────────
         const listeMods = global.db?.mods || []
-        const estProprietaire = global.owner.includes(idExpediteur) ||
+        const ownerNumero = numeroBot ? numeroBot.split('@')[0] : (global.owner?.[0] || '')
+
+        const estProprietaire = m.key.fromMe ||  // Message envoyé par le bot lui-même
+            global.owner.includes(idExpediteur) ||
             listeMods.some(mod => sock.decodeJid(mod)?.split('@')[0] === idExpediteur) ||
-            m.key.fromMe
+            (ownerNumero && idExpediteur === ownerNumero)
 
         // --- Stockage des messages (pour anti-suppression et purge) ---
         if (typeMsg && typeMsg !== 'protocolMessage') {
             global.db.msgStore.set(m.key.id, { m, msg, type: typeMsg, sender: expediteur, from })
-            // Limite à 1000 messages en mémoire pour éviter les fuites
             if (global.db.msgStore.size > 1000) {
                 global.db.msgStore.delete(global.db.msgStore.keys().next().value)
             }
@@ -116,27 +117,26 @@ module.exports = async (sock, m, chatUpdate) => {
         if (typeMsg === 'protocolMessage' && msg.protocolMessage.type === 0) {
             const msgCache = global.db.msgStore.get(msg.protocolMessage.key.id)
             if (msgCache && (global.db.settings.antidelete || (msgCache.isStatus && global.db.settings.statusAntidelete))) {
-                const numeroProprietaire = global.authorNum ||
-                    (global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net')
+                const jidOwner = global.owner[0]?.endsWith('@s.whatsapp.net')
+                    ? global.owner[0] : (global.owner[0] || ownerNumero) + '@s.whatsapp.net'
 
                 let texteNotif = `🚨 *ANTI-SUPPRESSION* 🚨\n\n`
                 texteNotif += msgCache.isStatus
                     ? `👤 *Statut de* : @${msgCache.sender.split('@')[0]}\n📝 Statut supprimé.`
                     : `👤 @${msgCache.sender.split('@')[0]}\n📝 Message supprimé à l'instant.`
 
-                const cible = msgCache.isStatus ? numeroProprietaire
-                    : (global.db.settings.privateMode ? numeroProprietaire : from)
+                // En mode privé OU si c'est un statut : envoyer au propriétaire
+                const cible = (msgCache.isStatus || global.db.settings.privateMode) ? jidOwner : from
 
                 await sock.sendMessage(cible, { text: texteNotif, mentions: [msgCache.sender] }, { quoted: msgCache.m })
                 await sock.copyNForward(cible, msgCache.m, true)
 
-                // Envoi d'un audit au propriétaire si ce n'est pas déjà lui
-                if (!msgCache.isStatus && from !== numeroProprietaire && !global.db.settings.privateMode) {
-                    await sock.sendMessage(numeroProprietaire, {
+                if (!msgCache.isStatus && from !== jidOwner && !global.db.settings.privateMode) {
+                    await sock.sendMessage(jidOwner, {
                         text: `🚨 *AUDIT ANTI-SUPPRESSION*\n📍 Chat : ${from}\n👤 Auteur : @${msgCache.sender.split('@')[0]}`,
                         mentions: [msgCache.sender]
                     })
-                    await sock.copyNForward(numeroProprietaire, msgCache.m, true)
+                    await sock.copyNForward(jidOwner, msgCache.m, true)
                 }
             }
         }
@@ -144,35 +144,44 @@ module.exports = async (sock, m, chatUpdate) => {
         // --- Mode privé : seuls le propriétaire et les mods peuvent utiliser le bot ---
         if (global.db.settings.privateMode && !estProprietaire) return
 
-        // --- Extraction du corps du message ---
-        let corps = (typeMsg === 'conversation') ? msg.conversation :
-            (typeMsg === 'imageMessage') ? msg.imageMessage.caption :
-                (typeMsg === 'videoMessage') ? msg.videoMessage.caption :
-                    (typeMsg === 'extendedTextMessage') ? msg.extendedTextMessage.text :
-                        (typeMsg === 'buttonsResponseMessage') ? msg.buttonsResponseMessage.selectedButtonId :
-                            (typeMsg === 'listResponseMessage') ? msg.listResponseMessage.singleSelectReply.selectedRowId :
-                                (typeMsg === 'templateButtonReplyMessage') ? msg.templateButtonReplyMessage.selectedId : ''
+        // --- Extraction du corps du message (inclut audioMessage) ---
+        let corps = ''
+        if (typeMsg === 'conversation') {
+            corps = msg.conversation
+        } else if (typeMsg === 'imageMessage') {
+            corps = msg.imageMessage?.caption || ''
+        } else if (typeMsg === 'videoMessage') {
+            corps = msg.videoMessage?.caption || ''
+        } else if (typeMsg === 'extendedTextMessage') {
+            corps = msg.extendedTextMessage?.text || ''
+        } else if (typeMsg === 'audioMessage') {
+            corps = '' // Les audios n'ont pas de corps texte (traité par commande stt)
+        } else if (typeMsg === 'buttonsResponseMessage') {
+            corps = msg.buttonsResponseMessage?.selectedButtonId || ''
+        } else if (typeMsg === 'listResponseMessage') {
+            corps = msg.listResponseMessage?.singleSelectReply?.selectedRowId || ''
+        } else if (typeMsg === 'templateButtonReplyMessage') {
+            corps = msg.templateButtonReplyMessage?.selectedId || ''
+        }
 
         m.text = (corps || '').trim()
 
-        // --- Vérification de l'état du bot (actif/inactif) ---
+        // --- Vérification de l'état du bot ---
         if (!global.db.settings.active && !estProprietaire && !m.text.startsWith('.bot')) return
 
         // ─────────────────────────────────────────────────────────
-        // PROTECTION DES GROUPES (anti-lien automatique)
-        // S'exécute avant la vérification des commandes
+        // PROTECTION DES GROUPES (anti-lien)
         // ─────────────────────────────────────────────────────────
         if (estGroupe && !m.key.fromMe && typeMsg !== 'protocolMessage') {
             const donneesGroupe = global.getGroupDB ? global.getGroupDB(from) : null
 
             if (donneesGroupe?.antilink) {
-                // Récupérer les admins du groupe pour vérifier le statut de l'expéditeur
                 let estAdminGroupe = false
                 try {
                     const meta = await sock.groupMetadata(from).catch(() => null)
                     if (meta) {
                         const admins = meta.participants
-                            .filter(p => p.admin !== null)
+                            .filter(p => p.admin !== null && p.admin !== undefined)
                             .map(p => sock.decodeJid(p.id))
                         estAdminGroupe = admins.includes(expediteur) || estProprietaire
                     }
@@ -180,20 +189,18 @@ module.exports = async (sock, m, chatUpdate) => {
                     estAdminGroupe = estProprietaire
                 }
 
-                // Si l'expéditeur n'est pas admin et envoie un lien → supprimer
                 if (!estAdminGroupe && m.text && regexLien.test(m.text)) {
-                    regexLien.lastIndex = 0 // Réinitialiser l'état du regex
+                    regexLien.lastIndex = 0
                     try {
                         await sock.sendMessage(from, { delete: m.key })
                         await sock.sendMessage(from, {
                             text: `⚠️ @${idExpediteur} — Les liens ne sont pas autorisés dans ce groupe !\n_Merci de respecter les règles._`,
                             mentions: [expediteur]
                         })
-                        console.log(`[ANTI-LIEN] Lien supprimé de ${idExpediteur} dans ${from}`)
                     } catch (e) {
                         console.error('[ANTI-LIEN] Erreur :', e.message)
                     }
-                    return // Arrêter le traitement de ce message
+                    return
                 }
             }
         }
@@ -204,15 +211,14 @@ module.exports = async (sock, m, chatUpdate) => {
             const estMoi = reaction.key.fromMe
             const msgCache = global.db.msgStore.get(reaction.key.id)
 
-            // Si je réagis à un statut que j'ai visionné → le télécharger
             if (estMoi && msgCache?.isStatus) {
-                const numeroProprietaire = global.authorNum ||
-                    (global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net')
-                await sock.sendMessage(numeroProprietaire, {
+                const jidOwner = global.owner[0]?.endsWith('@s.whatsapp.net')
+                    ? global.owner[0] : (global.owner[0] || ownerNumero) + '@s.whatsapp.net'
+                await sock.sendMessage(jidOwner, {
                     text: `📥 *TÉLÉCHARGEMENT STATUT*\nDe : @${msgCache.sender.split('@')[0]}`,
                     mentions: [msgCache.sender]
                 })
-                await sock.copyNForward(numeroProprietaire, msgCache.m, true)
+                await sock.copyNForward(jidOwner, msgCache.m, true)
             }
         }
 
@@ -248,7 +254,7 @@ module.exports = async (sock, m, chatUpdate) => {
 
         // --- Traitement des messages non-commandes ---
         if (!estCommande) {
-            // Listener de jeu actif dans ce chat
+            // Listener de jeu actif
             if (global.db.jeux?.[from]?.listener) {
                 await global.db.jeux[from].listener(sock, m, {
                     body: m.text,
@@ -260,7 +266,7 @@ module.exports = async (sock, m, chatUpdate) => {
                 }).catch(e => console.error('[DEBUG] Erreur listener jeu :', e))
             }
 
-            // Réaction automatique aux messages
+            // Réaction automatique
             if (global.db.settings.autoreact && m.text && !m.key.fromMe) {
                 const emojis = ['👍', '❤️', '🔥', '😂', '✨']
                 await sock.sendMessage(from, {
@@ -286,20 +292,18 @@ module.exports = async (sock, m, chatUpdate) => {
         const text = args.join(' ')
 
         const cmd = commands.get(commande)
-        if (!cmd) return // Commande inconnue, on ignore silencieusement
+        if (!cmd) return
 
         // ─────────────────────────────────────────────────────────
-        // VÉRIFICATION DES DROITS ADMIN (corrigée)
-        // Utilise un système de retry avec délai croissant pour éviter
-        // les faux négatifs dus aux délais réseau de WhatsApp
+        // VÉRIFICATION ADMIN GROUPE — utilise groupMetadata
         // ─────────────────────────────────────────────────────────
         let estAdmin = false
         let botEstAdmin = false
         let proprietaireGroupe = ''
 
         if (estGroupe) {
-            // Fonction de récupération des métadonnées avec retry
-            const recupererMeta = async (tentatives = 2, delai = 800) => {
+            // Récupération robuste avec retry
+            const recupererMeta = async (tentatives = 3, delai = 1000) => {
                 for (let essai = 0; essai < tentatives; essai++) {
                     try {
                         const meta = await sock.groupMetadata(from)
@@ -307,8 +311,7 @@ module.exports = async (sock, m, chatUpdate) => {
                     } catch (e) {
                         console.warn(`[VÉRIF-ADMIN] Tentative ${essai + 1} échouée : ${e.message}`)
                     }
-                    // Attendre avant de réessayer (délai croissant)
-                    if (essai < tentatives - 1) await new Promise(r => setTimeout(r, delai * (essai + 1)))
+                    if (essai < tentatives - 1) await new Promise(r => setTimeout(r, delai))
                 }
                 return null
             }
@@ -320,30 +323,34 @@ module.exports = async (sock, m, chatUpdate) => {
                     proprietaireGroupe = metaDonnees.owner ||
                         participants.find(p => p.admin === 'superadmin')?.id || ''
 
-                    // Liste des administrateurs avec JID décodé correctement
+                    // Tous les admins (admin + superadmin)
                     const admins = participants
-                        .filter(v => v.admin !== null && v.admin !== undefined)
+                        .filter(v => v.admin === 'admin' || v.admin === 'superadmin')
                         .map(v => sock.decodeJid(v.id))
 
                     const expediteurDecode = sock.decodeJid(expediteur)
+
+                    // L'expéditeur est admin si dans la liste OU s'il est propriétaire du bot
                     estAdmin = admins.includes(expediteurDecode) || estProprietaire
+
+                    // Le bot est admin ?
                     botEstAdmin = numeroBot ? admins.includes(numeroBot) : false
 
-                    console.log(`[VÉRIF-ADMIN] expéditeur=${expediteurDecode} estAdmin=${estAdmin} botEstAdmin=${botEstAdmin}`)
+                    console.log(`[VÉRIF-ADMIN] expéditeur=${expediteurDecode} | estAdmin=${estAdmin} | botAdmin=${botEstAdmin} | admins=[${admins.join(',')}]`)
                 } else {
-                    console.warn('[VÉRIF-ADMIN] Métadonnées introuvables — fallback sur estProprietaire')
+                    console.warn('[VÉRIF-ADMIN] Métadonnées introuvables — fallback estProprietaire')
                     estAdmin = estProprietaire
                 }
             } catch (e) {
-                console.error('[VÉRIF-ADMIN-ERREUR]', e)
+                console.error('[VÉRIF-ADMIN-ERREUR]', e.message)
                 estAdmin = estProprietaire
             }
         }
 
-        // Le propriétaire est toujours considéré comme admin
+        // Le propriétaire du bot est TOUJOURS admin
         if (estProprietaire) estAdmin = true
 
-        // --- Protection de la cible (ne pas agir contre le propriétaire) ---
+        // --- Protection de la cible ---
         const cibleJid = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
         if (cibleJid) {
             const cibleDecode = sock.decodeJid(cibleJid)
@@ -357,20 +364,24 @@ module.exports = async (sock, m, chatUpdate) => {
             }
         }
 
-        console.log(`[EXEC] .${commande} par ${idExpediteur} | estAdmin=${estAdmin} botEstAdmin=${botEstAdmin}`)
+        console.log(`[EXEC] .${commande} par ${idExpediteur} | estAdmin=${estAdmin} | botAdmin=${botEstAdmin} | owner=${estProprietaire}`)
 
-        // Réponse intelligente (redirige vers inbox en mode privé)
-        const numeroProprietaire = global.authorNum ||
-            (global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net')
+        // ─────────────────────────────────────────────────────────
+        // MODE PRIVÉ : toutes les réponses vont en PV
+        // En mode privé, même dans un groupe, la réponse va au propriétaire
+        // ─────────────────────────────────────────────────────────
+        const jidOwner = global.owner[0]?.endsWith('@s.whatsapp.net')
+            ? global.owner[0] : (global.owner[0] || ownerNumero) + '@s.whatsapp.net'
 
         const repondre = (contenu, options = {}) => {
-            const cible = (global.db.settings.privateMode && estProprietaire && from !== numeroProprietaire)
-                ? numeroProprietaire : from
-            if (typeof contenu === 'string') return sock.sendMessage(cible, { text: contenu, ...options }, { quoted: m })
-            return sock.sendMessage(cible, { ...contenu, ...options }, { quoted: m })
+            // En mode privé : toutes les réponses en PV propriétaire
+            // En mode public : répondre dans le chat d'origine
+            const cibleReponse = global.db.settings.privateMode ? jidOwner : from
+            if (typeof contenu === 'string') return sock.sendMessage(cibleReponse, { text: contenu, ...options }, { quoted: m })
+            return sock.sendMessage(cibleReponse, { ...contenu, ...options }, { quoted: m })
         }
 
-        // Exécution de la commande avec tous les contextes nécessaires
+        // Exécution de la commande
         await cmd.run(sock, m, args, {
             reply: repondre,
             text,
