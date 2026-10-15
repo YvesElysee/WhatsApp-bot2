@@ -73,7 +73,7 @@ module.exports = {
         menu += `┆ 🔄 *.autoreact* — Réaction auto\n`
         menu += `┆ 🛡️ *.antidelete* — Anti-suppression\n`
         menu += `┆ 🤖 *.bot* — Activer/désactiver le bot\n`
-        menu += `┆ 🔒 *.mode* — Mode privé\n`
+        menu += `┆ 🔒 *.mode* — Mode privé (propriétaire seul)\n`
         if (isOwner) menu += `┆ 🤖 *.aionly* — IA réservée au propriétaire\n`
         menu += `╰──────────────────────────\n\n`
 

@@ -1,5 +1,5 @@
 const { getBaileys } = require('../../lib/baileys')
-const { exec } = require('child_process')
+const { execFfmpeg } = require('../../lib/ffmpeg')
 const fs = require('fs')
 const path = require('path')
 
@@ -16,37 +16,35 @@ module.exports = {
         const dossier = tempDir || path.join(__dirname, '../../temp')
         if (!fs.existsSync(dossier)) fs.mkdirSync(dossier, { recursive: true })
 
+        const horodatage = Date.now()
+        const inputPath = path.join(dossier, `in_${horodatage}.webp`)
+        const outputPath = path.join(dossier, `out_${horodatage}.png`)
+
         try {
             const { downloadContentFromMessage } = await getBaileys()
             const flux = await downloadContentFromMessage(m.quoted.msg, 'sticker')
             let buffer = Buffer.from([])
             for await (const chunk of flux) buffer = Buffer.concat([buffer, chunk])
-
-            const inputPath = path.join(dossier, `in_${Date.now()}.webp`)
-            const outputPath = path.join(dossier, `out_${Date.now()}.png`)
+            if (!buffer.length) throw new Error('sticker vide')
 
             fs.writeFileSync(inputPath, buffer)
 
-            exec(`ffmpeg -y -i "${inputPath}" "${outputPath}"`, async (err) => {
-                try { if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath) } catch (e) { /* ignore */ }
-                if (err) {
-                    console.error('[TOIMG ffmpeg]', err.message)
-                    return reply('❌ Erreur de conversion. Assurez-vous que ffmpeg est installé.')
-                }
-                try {
-                    await sock.sendMessage(m.key.remoteJid, {
-                        image: fs.readFileSync(outputPath),
-                        caption: '✅ Sticker converti en image !'
-                    }, { quoted: m })
-                } catch (e) {
-                    await reply('❌ Échec de l\'envoi de l\'image.')
-                } finally {
-                    try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath) } catch (e) { /* ignore */ }
-                }
-            })
+            await execFfmpeg(['-y', '-i', inputPath, '-frames:v', '1', outputPath])
+
+            const octets = fs.readFileSync(outputPath)
+            if (!octets.length) throw new Error('image vide')
+
+            await sock.sendMessage(m.key.remoteJid, {
+                image: octets,
+                caption: '✅ Sticker converti en image !'
+            }, { quoted: m })
         } catch (e) {
             console.error('[TOIMG]', e.message)
-            reply('❌ Échec de la conversion.')
+            await reply(`❌ Échec de la conversion.\n_${e.message}_`)
+        } finally {
+            for (const f of [inputPath, outputPath]) {
+                try { if (fs.existsSync(f)) fs.unlinkSync(f) } catch (e) { /* ignore */ }
+            }
         }
     }
 }

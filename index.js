@@ -151,6 +151,9 @@ global.db = {
         statusView: false,
         statusLike: false,
         statusAntidelete: false,
+        // Mode privé : seul le propriétaire utilise le bot (les réponses
+        // restent dans le chat). replyInPv : réponses envoyées en PV owner.
+        replyInPv: false,
         active: true
     },
     mods: [],

@@ -55,10 +55,17 @@ module.exports = {
             const fichier = fichierProduit(sortie)
             if (!fichier) throw new Error('Fichier vidéo non généré.')
 
+            // Mimetype calé sur l'extension réelle (mp4 / webm / mkv…)
+            const ext = path.extname(fichier).slice(1).toLowerCase() || 'mp4'
+            const mimeVideo = ext === 'webm' ? 'video/webm'
+                : ext === 'mkv' ? 'video/x-matroska'
+                    : ext === '3gp' ? 'video/3gpp'
+                        : 'video/mp4'
+
             await sock.sendMessage(m.key.remoteJid, {
                 video: fs.readFileSync(fichier),
                 caption: `✅ *${vid.title}*`,
-                mimetype: 'video/mp4'
+                mimetype: mimeVideo
             }, { quoted: m })
         } catch (e) {
             console.error('[VLT ERREUR]', e.message)

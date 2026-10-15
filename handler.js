@@ -355,21 +355,46 @@ module.exports = async (sock, m, chatUpdate) => {
         // Le propriétaire du bot est TOUJOURS admin
         if (estProprietaire) estAdmin = true
 
-        // --- Protection de la cible ---
+        // ─────────────────────────────────────────────────────────
+        // PROTECTION DE LA CIBLE : aucun membre ne doit pouvoir utiliser
+        // une commande contre le propriétaire (mention, réponse, ou
+        // numéro tapé en dur dans les arguments).
+        // ─────────────────────────────────────────────────────────
         const cibleJid = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
+        const numeroOwner = global.jidToNumber(global.owner?.[0] || '')
+
+        // Commandes qui agissent sur un membre / ses messages
+        const COMMANDES_SENSIBLES = new Set([
+            'kick', 'promote', 'demote', 'delete', 'del',
+            'delgrp', 'purge', 'cleanme', 'delmsg', 'warn', 'report'
+        ])
+
+        const estLeProprietaire = (jid) => {
+            if (!jid) return false
+            const jidDecode = sock.decodeJid(jid)
+            return global.sameJid(jidDecode, global.owner?.[0]) ||
+                global.sameJid(jidDecode, global.ownerLid) ||
+                global.sameJid(jidDecode, numeroBot) ||
+                global.sameJid(jidDecode, proprietaireGroupe)
+        }
+
         if (cibleJid) {
             const cibleDecode = sock.decodeJid(cibleJid)
-            const estCibleProprietaire =
-                global.sameJid(cibleDecode, global.owner?.[0]) ||
-                global.sameJid(cibleDecode, global.ownerLid) ||
-                global.sameJid(cibleDecode, numeroBot)
-            const estCibleProprietaireGroupe = global.sameJid(cibleDecode, proprietaireGroupe)
+            const estCibleProtegee = estLeProprietaire(cibleDecode)
 
-            if ((estCibleProprietaire || estCibleProprietaireGroupe) && !estProprietaire && !global.sameJid(cibleDecode, expediteur)) {
+            if (estCibleProtegee && !estProprietaire && !global.sameJid(cibleDecode, expediteur)) {
                 return sock.sendMessage(from, {
-                    text: '❌ Action interdite : vous ne pouvez pas utiliser de commandes contre le propriétaire.'
+                    text: '❌ *Action interdite.*\nImpossible d\'utiliser une commande du bot contre le propriétaire.'
                 }, { quoted: m })
             }
+        }
+
+        // Repli : numéro du propriétaire écrit en dur dans les arguments
+        // (ex: `.kick 237697353272` sans mention ni réponse)
+        if (!estProprietaire && numeroOwner && COMMANDES_SENSIBLES.has(commande) && text.includes(numeroOwner)) {
+            return sock.sendMessage(from, {
+                text: '❌ *Action interdite.*\nCette commande viserait le propriétaire du bot.'
+            }, { quoted: m })
         }
 
         console.log(`[EXEC] .${commande} par ${idExpediteur} | estAdmin=${estAdmin} | botAdmin=${botEstAdmin} | owner=${estProprietaire}`)
@@ -381,9 +406,12 @@ module.exports = async (sock, m, chatUpdate) => {
         const jidOwner = global.ownerJid() || (ownerNumero ? ownerNumero + '@s.whatsapp.net' : from)
 
         const repondre = (contenu, options = {}) => {
-            // En mode privé : toutes les réponses en PV propriétaire
-            // En mode public : répondre dans le chat d'origine
-            const cibleReponse = global.db.settings.privateMode ? jidOwner : from
+            // MODE PRIVÉ : seul le propriétaire utilise le bot, mais les
+            // réponses restent DANS LE CHAT (groupe ou PV) pour que tout
+            // le monde voie le résultat — sauf `.mode pv` (réponses en PV).
+            const versPv = global.db.settings.replyInPv &&
+                (global.db.settings.privateMode || estProprietaire)
+            const cibleReponse = versPv ? jidOwner : from
             // On ne peut pas citer un message d'un autre chat
             const opts = { ...options }
             if (cibleReponse !== from) delete opts.quoted

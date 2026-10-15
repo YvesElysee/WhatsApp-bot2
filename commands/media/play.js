@@ -58,11 +58,18 @@ module.exports = {
             const fichier = fichierProduit(sortie)
             if (!fichier) throw new Error('Aucun fichier audio généré.')
 
+            // WhatsApp exige un mimetype fidèle au fichier réel produit
+            const ext = path.extname(fichier).slice(1).toLowerCase() || 'mp3'
+            const mimeAudio = ext === 'm4a' ? 'audio/mp4'
+                : ext === 'opus' || ext === 'ogg' ? 'audio/ogg; codecs=opus'
+                    : ext === 'wav' ? 'audio/wav'
+                        : 'audio/mpeg'
+
             await sock.sendMessage(m.key.remoteJid, {
                 audio: fs.readFileSync(fichier),
-                mimetype: 'audio/mp4',
+                mimetype: mimeAudio,
                 ptt: false,
-                fileName: `${(video.title || 'audio').substring(0, 48)}.mp3`
+                fileName: `${(video.title || 'audio').substring(0, 48)}.${ext}`
             }, { quoted: m })
 
             console.log(`[PLAY] Audio envoyé : ${video.title}`)

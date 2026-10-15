@@ -1,7 +1,7 @@
 const { getBaileys } = require('../../lib/baileys')
+const { execFfmpeg } = require('../../lib/ffmpeg')
 const fs = require('fs')
 const path = require('path')
-const { exec } = require('child_process')
 
 module.exports = {
     name: 'sticker',
@@ -20,31 +20,46 @@ module.exports = {
         const dossier = tempDir || path.join(__dirname, '../../temp')
         if (!fs.existsSync(dossier)) fs.mkdirSync(dossier, { recursive: true })
 
+        const horodatage = Date.now()
+        const tempIn = path.join(dossier, `s_${horodatage}.${mime.split('/')[1] || 'jpg'}`)
+        const tempOut = path.join(dossier, `s_${horodatage}.webp`)
+
         try {
             const { downloadContentFromMessage } = await getBaileys()
             const flux = await downloadContentFromMessage(source, mime.split('/')[0])
             let buffer = Buffer.from([])
             for await (const chunk of flux) buffer = Buffer.concat([buffer, chunk])
+            if (!buffer.length) throw new Error('média vide')
 
-            const tempIn = path.join(dossier, `s_${Date.now()}.${mime.split('/')[1]}`)
-            const tempOut = path.join(dossier, `s_${Date.now()}.webp`)
             fs.writeFileSync(tempIn, buffer)
 
-            exec(`ffmpeg -y -i "${tempIn}" -vcodec libwebp -vf "scale='min(320,iw)':min'(320,ih)':force_original_aspect_ratio=decrease,fps=15, pad=320:320:-1:-1:color=white@0.0, split [a][b]; [a] palettegen=reserve_transparent=on:transparency_color=ffffff [p]; [b][p] paletteuse" "${tempOut}"`, (err) => {
-                try { if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn) } catch (e) { /* ignore */ }
-                if (err) {
-                    console.error('[STICKER ffmpeg]', err.message)
-                    return reply('❌ Erreur FFmpeg. Vérifiez que ffmpeg est installé sur le serveur.')
-                }
-                try {
-                    sock.sendMessage(m.key.remoteJid, { sticker: fs.readFileSync(tempOut) }, { quoted: m })
-                } finally {
-                    try { if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut) } catch (e) { /* ignore */ }
-                }
-            })
+            // Recette sticker WhatsApp : carré 320x320, fond transparent, webp
+            const filtre =
+                "scale='min(320,iw)':'min(320,ih)':force_original_aspect_ratio=decrease:flags=lanczos," +
+                "fps=15," +
+                "pad=320:320:(ow-iw)/2:(oh-ih)/2:color=white@0.0," +
+                'split[0][1];' +
+                '[0]palettegen=reserve_transparent=on:transparency_color=ffffff[p];' +
+                '[1][p]paletteuse=new=1:alpha_threshold=128'
+
+            // Sticker animé : WhatsApp refuse au-delà de ~6 s
+            const argsFFmpeg = ['-y', '-i', tempIn]
+            if (/video/.test(mime) && Number(source.seconds || 0) > 6) argsFFmpeg.push('-t', '6')
+            argsFFmpeg.push('-vcodec', 'libwebp', '-vf', filtre, '-loop', '0', '-an', '-vsync', '0', tempOut)
+
+            await execFfmpeg(argsFFmpeg)
+
+            const octets = fs.readFileSync(tempOut)
+            if (!octets.length) throw new Error('sticker vide')
+
+            await sock.sendMessage(m.key.remoteJid, { sticker: octets }, { quoted: m })
         } catch (e) {
             console.error('[STICKER]', e.message)
-            reply('❌ Échec de la création du sticker.')
+            await reply(`❌ Échec de la création du sticker.\n_${e.message}_`)
+        } finally {
+            for (const f of [tempIn, tempOut]) {
+                try { if (fs.existsSync(f)) fs.unlinkSync(f) } catch (e) { /* ignore */ }
+            }
         }
     }
 }
