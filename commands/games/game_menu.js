@@ -2,7 +2,7 @@ module.exports = {
     name: 'game',
     category: 'games',
     desc: 'Affiche les jeux disponibles.',
-    commands: ['game', 'games', 'divertissement'],
+    commands: ['game', 'games', 'divertissement', 'listgame'],
     run: async (sock, m, args, { reply, commands }) => {
         const organized = []
         const processed = new Set()

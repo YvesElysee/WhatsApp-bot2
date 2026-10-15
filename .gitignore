@@ -5,3 +5,6 @@ temp
 npm-debug.log
 .DS_Store
 *.log
+*.zip
+*.exe
+database.json

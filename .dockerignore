@@ -7,3 +7,5 @@ npm-debug.log
 .gitignore
 Dockerfile
 README.md
+*.zip
+*.exe

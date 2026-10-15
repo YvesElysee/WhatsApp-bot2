@@ -12,31 +12,41 @@ Ce bot a été créé et est maintenu par **Elysée**.
 ## ✨ Fonctionnalités Principales
 
 ### 🧠 Intelligence Artificielle (Multi-IA)
-- **Rotation Intelligente** : Utilise 4 clés Gemini et 2 clés DeepSeek avec basculement automatique en cas de limite atteinte.
-- **Commandes** : `.ai`, `.gemini`, `.ia` pour discuter avec l'IA.
-- **Synthèse Vocale (STT)** : Transcription audio en texte.
-- **Traduction** : Traduction multi-langues ultra-rapide.
+- **Rotation automatique** : OpenRouter, Google Gemini (4 clés), WisdomGate — basculement automatique en cas de limite atteinte.
+- **Commandes** : `.ai`, `.ely`, `.meta` pour discuter avec l'IA.
+- **Chatbot** : le bot répond quand on le mentionne (`.chatbot on/off`).
+- **Réglage d'accès** : `.aionly on/off` (propriétaire) — restreint l'IA au propriétaire, sinon elle est publique.
+- **Synthèse Vocale (STT)** : `.stt` — transcription audio en texte.
+- **Traduction** : `.translate` multi-langues.
 
 ### 📸 Outils & Utilitaires
-- **.capture** : Prenez une capture d'écran de n'importe quel site web instantanément.
-- **.info** : Recherche Google en temps réel sur un numéro ou un nom.
-- **.tts** : Conversion de texte en parole.
-- **.sticker** : Créez des stickers à partir d'images ou de vidéos.
+- **.capture** : capture d'écran d'un site web.
+- **.info** : recherche Google en temps réel.
+- **.maps** : recherche de lieu.
+- **.tts** : texte vers voix.
+- **.session** : exporte la session en Base64 (`SESSION_DATA`) pour Render/Vercel (propriétaire uniquement).
 
 ### 💻 Développeurs & Code
-- **.compile** : Exécutez du code (C, Python, Java, JavaScript, C++) directement dans le chat via l'API Piston.
+- **.compile** : exécute du code (C, Python, Java, JavaScript, C++) via l'API Piston.
 
 ### 🎮 Divertissement & Jeux
-- **Morpion Premium** : Un jeu de Tic-Tac-Toe relooké avec une interface dynamique.
-- **Pendu / Quiz / Devine** : Jeux interactifs basés sur l'IA pour animer vos groupes.
+- **.morpion** / **.puissance4** : jeux classiques (avec adversaire IA possible).
+- **.pendu** / **.quiz** / **.devine** / **.guess** : jeux interactifs basés sur l'IA.
+- **.motgame** : remettez le mot mélangé dans le bon ordre.
+- **.pileface** : lance la pièce.
+- **.stopgame** : arrête la partie en cours. `.game` : liste des jeux.
 
 ### 🎞 Médias & Téléchargement
-- **.play** : Téléchargez et écoutez de la musique depuis YouTube (avec affichage des métadonnées).
-- **Extraction** : Extrayez l'audio depuis une vidéo.
+- **.play** : musique depuis YouTube (avec métadonnées), via yt-dlp.
+- **.vlt** : vidéo depuis YouTube.
+- **.sticker** / **.toimg** : créer un sticker / le convertir en image.
+- **.extract** : récupère tout média cité (dont messages à vue unique).
+- **.statusdown** : télécharge le statut auquel vous répondez.
 
 ### 👑 Administration
-- **Gestion de Groupe** : `.kick`, `.promote`, `.demote`, `.tagall`, `.mute`, `.unmute`.
-- **Protection** : Système anti-delete intégré et protection des administrateurs.
+- **Gestion de Groupe** : `.kick`, `.promote`, `.demote`, `.tagall`, `.hidetag`, `.mute`, `.unmute`, `.delete`, `.delgrp`.
+- **Protection** : anti-liens (`.antilink`), anti-suppression (`.antidelete`), avertissements (`.warn`).
+- **Détection admin fiable** : le bot sait exactement s'il est admin (comparaison par numéro, support des JID `@lid`, métadonnées mises en cache 60 s → réponses rapides).
 
 ---
 
@@ -44,18 +54,25 @@ Ce bot a été créé et est maintenu par **Elysée**.
 
 1. **Cloner le repository** :
    ```bash
-   git clone https://github.com/votre-repo/Ely-Bot.git
+   git clone <votre-repo>
    ```
-2. **Installer les dépendances** :
+2. **Installer les dépendances** (Node.js 24.x requis) :
    ```bash
    npm install
    ```
 3. **Configurer les variables d'environnement** (`.env`) :
-   - Ajoutez vos clés `GEMINI_KEY_1-4` et `DEEPSEEK_KEY_1-2`.
+   ```bash
+   cp .env.example .env
+   ```
+   - Minimum : une clé IA (`OPENROUTER_KEY` ou `GEMINI_KEY_1`).
+   - Hébergement éphémère : ajoutez `SESSION_DATA` (générée avec `.session`).
 4. **Lancer le bot** :
    ```bash
    npm start
    ```
+5. **Scanner le QR code** (ou utiliser `PAIRING_NUMBER` pour un code de jumelage).
+
+> 💡 `ffmpeg` et `yt-dlp` sont requis pour les stickers et le téléchargement média (installés automatiquement dans le Dockerfile).
 
 ---
 

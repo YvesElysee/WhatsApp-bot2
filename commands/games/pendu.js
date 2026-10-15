@@ -1,66 +1,96 @@
+const sansAccents = (s) => String(s)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase().replace(/[^A-ZÀ-ÿ]/g, '')
+
 module.exports = {
     name: 'pendu',
     category: 'games',
-    desc: 'Jeu du pendu.',
-    run: async (sock, m, args, { reply, getDeepSeekResponse }) => {
+    desc: 'Jeu du pendu (l\'IA choisit le mot, tout le monde joue).',
+    run: async (sock, m, args, { reply, getAIResponse }) => {
         const from = m.key.remoteJid
-        if (global.db.games[from]) return reply('❌ Une partie est déjà en cours !')
+        if (global.db.games[from]) return reply('❌ Une partie est déjà en cours ici ! Utilisez `.stopgame`.')
 
-        reply('🎭 L\'IA prépare un Pendu Multijoueur...')
+        await reply('🎭 L\'IA prépare un mot...')
 
         try {
-            const prompt = "Génère un seul mot commun en français (4-10 lettres) et un indice. Réponds en JSON: {\"word\": \"...\", \"hint\": \"...\"}"
-            const result = await getDeepSeekResponse(prompt)
-            if (!result) throw new Error('Réponse IA vide')
+            const prompt =
+                'Génère un mot commun en français de 4 à 10 lettres ainsi qu\'un indice. ' +
+                'Réponds UNIQUEMENT en JSON strict : {"word":"...","hint":"..."}'
+            const res = await getAIResponse(prompt)
+            const brut = res?.out || (typeof res === 'string' ? res : '')
+            if (!brut) throw new Error('Réponse IA vide')
 
-            const data = JSON.parse(result.replace(/```json|```/g, '').trim())
-            const word = data.word.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            const propre = String(brut).replace(/```json|```/g, '').trim()
+            const debut = propre.indexOf('{')
+            const fin = propre.lastIndexOf('}')
+            let data = null
+            if (debut !== -1 && fin !== -1) {
+                try { data = JSON.parse(propre.substring(debut, fin + 1)) } catch (e) { /* repli ci-dessous */ }
+            }
+
+            let word = sansAccents(data?.word || '')
+            if (word.length < 4 || word.length > 10) {
+                // Repli : mot valide hors IA
+                const mots = ['BONJOUR', 'AMIGOS', 'MAISON', 'VOITURE', 'SOLEIL', 'MUSIQUE', 'HISTOIRE', 'JARDIN']
+                word = mots[Math.floor(Math.random() * mots.length)]
+            }
+            const hint = data?.hint || 'Indice disponible auprès de l\'IA.'
 
             const game = {
                 type: 'pendu',
                 word,
-                hint: data.hint,
+                hint,
                 display: word.split('').map(() => '_'),
                 attempts: 8,
                 used: []
             }
 
-            const render = () => `🧩 *PENDU MULTIJOUEUR*\n\n💡 *Indice:* ${game.hint}\n\nMot: \`${game.display.join(' ')}\`\n❤️ Essais: ${game.attempts}\n🔠 Lettres: ${game.used.join(', ')}`
+            const render = () => {
+                let t = `🧩 *PENDU MULTIJOUEUR*\n\n`
+                t += `💡 *Indice :* ${game.hint}\n\n`
+                t += `Mot : \`${game.display.join(' ')}\`\n`
+                t += `❤️ Essais restants : ${game.attempts}\n`
+                t += `🔠 Lettres utilisées : ${game.used.length ? game.used.join(' ') : '—'}\n\n`
+                t += `👉 *Envoyez une lettre !*`
+                return t
+            }
 
-            global.db.games[from] = {
-                ...game,
-                listener: async (sock, m, { body, sender, reply }) => {
-                    const game = global.db.games[from]
-                    const char = body.toUpperCase().trim()
-                    if (char.length !== 1 || !/[A-Z]/.test(char)) return
-                    if (game.used.includes(char)) return
+            game.listener = async (sock2, m2, { body, sender, reply: r }) => {
+                const partie = global.db.games[from]
+                if (!partie) return
+                const char = String(body || '').toUpperCase().trim()
+                if (char.length !== 1 || !/[A-Z]/.test(char)) return
+                if (partie.used.includes(char)) return r('🔁 Cette lettre a déjà été essayée !')
 
-                    game.used.push(char)
-                    if (game.word.includes(char)) {
-                        for (let i = 0; i < game.word.length; i++) {
-                            if (game.word[i] === char) game.display[i] = char
-                        }
-                        if (!game.display.includes('_')) {
-                            reply(`🎉 *VICTOIRE COLLECTIVE !*\n\nLe mot était: *${game.word}*\n${render()}`)
-                            delete global.db.games[from]
-                        } else {
-                            reply(render())
-                        }
+                partie.used.push(char)
+
+                if (partie.word.includes(char)) {
+                    for (let i = 0; i < partie.word.length; i++) {
+                        if (partie.word[i] === char) partie.display[i] = char
+                    }
+                    if (!partie.display.includes('_')) {
+                        await r(`🎉 *VICTOIRE COLLECTIVE !*\n\nLe mot était : *${partie.word}*`)
+                        delete global.db.games[from]
                     } else {
-                        game.attempts--
-                        if (game.attempts <= 0) {
-                            reply(`💀 *DEFAITE !*\nLe mot était: *${game.word}*`)
-                            delete global.db.games[from]
-                        } else {
-                            reply(render())
-                        }
+                        await r(render())
+                    }
+                } else {
+                    partie.attempts--
+                    if (partie.attempts <= 0) {
+                        await r(`💀 *DÉFAITE !*\nLe mot était : *${partie.word}*`)
+                        delete global.db.games[from]
+                    } else {
+                        await r(render())
                     }
                 }
             }
-            reply(render() + '\n\n👉 *Tout le monde peut participer !*')
+
+            global.db.games[from] = game
+
+            await reply(render() + '\n\n_Pour arrêter, tapez_ `.stopgame`')
         } catch (e) {
-            console.error(e)
-            reply('❌ Erreur de génération du Pendu.')
+            console.error('[PENDU]', e.message)
+            reply('❌ Erreur de génération du Pendu. Réessayez dans un instant.')
         }
     }
 }

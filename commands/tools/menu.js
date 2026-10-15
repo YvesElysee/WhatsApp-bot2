@@ -36,6 +36,7 @@ module.exports = {
         menu += `┆ 😄 *.sticker* — Créer un sticker\n`
         menu += `┆ 🖼️ *.toimg* — Sticker → Image\n`
         menu += `┆ 📤 *.extract* — Extraire média d'un sticker\n`
+        menu += `┆ 📇 *.statusdown* — Télécharger un statut\n`
         menu += `┆ 🗣️ *.tts* — Texte vers voix\n`
         menu += `╰──────────────────────────\n\n`
 
@@ -48,6 +49,7 @@ module.exports = {
         menu += `┆ ℹ️ *.info* — Infos sur un utilisateur\n`
         menu += `┆ 📜 *.list* — Catalogue de commandes\n`
         menu += `┆ ℹ️ *.about* — À propos du bot\n`
+        if (isOwner) menu += `┆ 🔑 *.session* — Exporter la session (Base64)\n`
         menu += `╰──────────────────────────\n\n`
 
         // ── Games Section ──────────────────────────────────────
@@ -58,6 +60,8 @@ module.exports = {
         menu += `┆ 🟡 *.puissance4* — Puissance 4\n`
         menu += `┆ 🔤 *.pendu* — Le Pendu\n`
         menu += `┆ 🧠 *.quiz* — Quiz de culture générale\n`
+        menu += `┆ 🔤 *.motgame* — Mot mélangé\n`
+        menu += `┆ 🪙 *.pileface* — Pile ou Face\n`
         menu += `┆ 🛑 *.stopgame* — Arrêter le jeu en cours\n`
         menu += `╰──────────────────────────\n\n`
 
@@ -70,6 +74,7 @@ module.exports = {
         menu += `┆ 🛡️ *.antidelete* — Anti-suppression\n`
         menu += `┆ 🤖 *.bot* — Activer/désactiver le bot\n`
         menu += `┆ 🔒 *.mode* — Mode privé\n`
+        if (isOwner) menu += `┆ 🤖 *.aionly* — IA réservée au propriétaire\n`
         menu += `╰──────────────────────────\n\n`
 
         // ── Admin & Group (visible to admins/owner in groups) ──

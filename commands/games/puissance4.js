@@ -92,7 +92,7 @@ module.exports = {
             const game = global.db.games[from]
             if (!game || game.type !== 'puissance4') return
 
-            if (sender !== game.players[game.turn]) return
+            if (!global.sameJid(sender, game.players[game.turn])) return
 
             const col = parseInt(body) - 1
             if (isNaN(col) || col < 0 || col >= cols) return
@@ -157,7 +157,8 @@ module.exports = {
             }
         }
 
-        const opponent = isAI ? '🤖 IA' : `@${player2.split('@')[0]}`
-        reply(`🎮 *PUISSANCE 4* 🎮\n\n${renderBoard(board)}\n🔴 @${sender.split('@')[0]}\n🟡 ${opponent}\n\n👉 @${sender.split('@')[0]}, choisis une colonne (1-7) !`, { mentions: [sender, player2] })
+        const opponent = isAI ? '🤖 IA' : `@${global.jidToNumber(player2)}`
+        const mentions = isAI ? [sender] : [sender, player2]
+        reply(`🎮 *PUISSANCE 4* 🎮\n\n${renderBoard(board)}\n🔴 @${global.jidToNumber(sender)}\n🟡 ${opponent}\n\n👉 @${global.jidToNumber(sender)}, choisis une colonne (1-7) !`, { mentions })
     }
 }

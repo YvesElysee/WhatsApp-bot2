@@ -76,13 +76,15 @@ io.on('connection', (socket) => {
 // BASE DE DONNÉES GLOBALE
 // ─────────────────────────────────────────────────────────
 global.db = {
-    jeux: {},
+    // Jeux en cours (clé = JID du chat). En mémoire uniquement, jamais persistés.
+    games: {},
     groups: {},
     settings: {
         antidelete: false,
         autoreact: false,
         privateMode: false,
         ibOnly: false,
+        // Accès IA : false = tout le monde, true = propriétaire uniquement (.aionly on/off)
         aiOnly: false,
         chatbot: false,
         statusView: false,
@@ -94,6 +96,14 @@ global.db = {
     msgStore: new Map(),
     geminiIndex: 0
 }
+
+// Alias rétro-compatible : certains modules utilisent encore global.db.jeux
+Object.defineProperty(global.db, 'jeux', {
+    get() { return this.games },
+    set(v) { this.games = v },
+    enumerable: false,
+    configurable: true
+})
 
 // Initialise les données d'un groupe s'il n'existe pas encore
 global.getGroupDB = (groupJid) => {
@@ -111,11 +121,96 @@ global.getGroupDB = (groupJid) => {
 }
 
 // ─────────────────────────────────────────────────────────
+// HELPERS GLOBAUX (partagés par handler.js et les commandes)
+// ─────────────────────────────────────────────────────────
+
+// Numéro "propre" sans device ni domaine : 123:4@s.whatsapp.net → 123
+global.jidToNumber = (jid) => {
+    if (!jid || typeof jid !== 'string') return ''
+    return jid.split('@')[0].split(':')[0]
+}
+
+// Comparaison robuste de deux JID (gère @s.whatsapp.net, @lid et le suffixe :device)
+global.sameJid = (a, b) => {
+    if (!a || !b) return false
+    return global.jidToNumber(a) === global.jidToNumber(b)
+}
+
+// JID du propriétaire (toujours au format @s.whatsapp.net)
+global.ownerJid = () => {
+    const o = global.owner?.[0] || global.authorNum || ''
+    if (!o) return null
+    return o.endsWith('@s.whatsapp.net') ? o : `${global.jidToNumber(o)}@s.whatsapp.net`
+}
+
+// Cache des métadonnées de groupe pour éviter un appel réseau à chaque message
+// (cause principale de lenteur dans les groupes)
+const _groupMetaCache = new Map()
+const GROUP_META_TTL = 60 * 1000 // 60 s
+
+global.getGroupMetadata = async (sock, jid, force = false) => {
+    if (!jid || !jid.endsWith('@g.us')) return null
+    const cached = _groupMetaCache.get(jid)
+    if (!force && cached && (Date.now() - cached.at) < GROUP_META_TTL) {
+        return cached.meta
+    }
+    try {
+        const meta = await sock.groupMetadata(jid)
+        if (meta?.participants?.length) {
+            _groupMetaCache.set(jid, { meta, at: Date.now() })
+            return meta
+        }
+    } catch (e) {
+        // En cas d'échec, renvoyer le cache périmé s'il existe
+        if (cached) return cached.meta
+        console.warn(`[GROUPES] groupMetadata(${jid}) échoué : ${e.message}`)
+    }
+    return cached ? cached.meta : null
+}
+
+// Vérifie si un JID (bot ou membre) est admin d'après les métadonnées
+// Gère les JID classiques ET les JID @lid (migration WhatsApp)
+global.estAdminDans = (meta, jid) => {
+    if (!meta?.participants || !jid) return false
+    const cible = global.jidToNumber(jid)
+    if (!cible) return false
+    const p = meta.participants.find(part => {
+        const id = global.jidToNumber(part.id)
+        const lid = global.jidToNumber(part.lid)
+        return id === cible || (lid && lid === cible)
+    })
+    return !!(p && (p.admin === 'admin' || p.admin === 'superadmin'))
+}
+
+// ─────────────────────────────────────────────────────────
 // SYSTÈME MULTI-IA
 // Priorité : OpenRouter (Meta Llama-3 gratuit) → Gemini → WisdomGate
+// `systemPrompt` optionnel permet aux commandes (jeux, jeux de rôle...) de
+// définir leur propre persona, ce qui évite que l'IA "refuse" la tâche.
 // ─────────────────────────────────────────────────────────
-global.getAIResponse = async (text, provider = 'auto') => {
+const PROMPT_SYSTEME_DEFAUT =
+    "Tu es Ely, un assistant WhatsApp intelligent, direct et utile. " +
+    "Réponds toujours dans la langue de l'utilisateur (français par défaut). " +
+    "Tu peux parler de tous les sujets licites sans faire de morale inutile. " +
+    "Ne te présente jamais comme un modèle de langage : reste concis et naturel."
+
+// Applique un délai maximum à une promesse (évite les blocages réseau)
+const avecDelai = (promesse, ms, libelle) => Promise.race([
+    promesse,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`Délai dépassé (${libelle})`)), ms))
+])
+
+global.getAIResponse = async (text, provider = 'auto', systemPrompt = null) => {
     const nettoyer = (k) => (typeof k === 'string') ? k.trim() : ''
+    const sys = systemPrompt || PROMPT_SYSTEME_DEFAUT
+
+    // Budget global : toute la chaîne (tous fournisseurs confondus) ne doit
+    // jamais dépasser 60 s — évite de faire attendre un chat ou un jeu.
+    const debut = Date.now()
+    const BUDGET_MS = 60000
+    const resteDuTemps = () => BUDGET_MS - (Date.now() - debut)
+    const delaiPour = (ms) => Math.max(2000, Math.min(ms, resteDuTemps()))
+    const budgetEpuise = () => resteDuTemps() < 3000
 
     const clefsGemini = [
         nettoyer(process.env.GEMINI_KEY_1),
@@ -133,7 +228,7 @@ global.getAIResponse = async (text, provider = 'auto') => {
     const cleOpenRouter = nettoyer(process.env.OPENROUTER_KEY)
     const openRouterValide = cleOpenRouter.length > 10
 
-    console.log(`[IA-DEBUG] Gemini:${clefsGemini.length} WG:${clefsWG.length} OpenRouter:${openRouterValide ? 'OUI('+cleOpenRouter.substring(0,12)+'...)' : 'NON'}`)
+    console.log(`[IA-DEBUG] Gemini:${clefsGemini.length} WG:${clefsWG.length} OpenRouter:${openRouterValide ? 'OUI' : 'NON'}`)
 
     // ── OpenRouter — Meta Llama-3 (gratuit) ──
     const essayerOpenRouter = async () => {
@@ -156,16 +251,17 @@ global.getAIResponse = async (text, provider = 'auto') => {
             }
         })
         for (const modele of modeles) {
+            if (budgetEpuise()) break
             try {
                 console.log(`[IA-OPENROUTER] Essai modèle: ${modele}`)
-                const completion = await client.chat.completions.create({
+                const completion = await avecDelai(client.chat.completions.create({
                     model: modele,
                     messages: [
-                        { role: 'system', content: 'Tu es Ely, un assistant WhatsApp intelligent. Réponds en français sauf si l\'utilisateur écrit dans une autre langue.' },
+                        { role: 'system', content: sys },
                         { role: 'user', content: text }
                     ],
                     max_tokens: 1200
-                })
+                }), delaiPour(30000), 'openrouter')
                 const reponse = completion.choices?.[0]?.message?.content
                 if (reponse && reponse.trim().length > 0) {
                     console.log(`[IA-OPENROUTER] Succès avec ${modele}`)
@@ -188,16 +284,28 @@ global.getAIResponse = async (text, provider = 'auto') => {
     const essayerGemini = async () => {
         if (clefsGemini.length === 0) return null
         for (let i = 0; i < clefsGemini.length; i++) {
+            if (budgetEpuise()) return null
             const index = (global.db.geminiIndex + i) % clefsGemini.length
             const cle = clefsGemini[index]
             const genAI = new GoogleGenerativeAI(cle)
             const modeles = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro']
             for (const modeleId of modeles) {
+                if (budgetEpuise()) return null
                 try {
-                    const modele = genAI.getGenerativeModel({ model: modeleId })
-                    const resultat = await modele.generateContent({
-                        contents: [{ role: 'user', parts: [{ text }] }]
+                    const modele = genAI.getGenerativeModel({
+                        model: modeleId,
+                        systemInstruction: sys
                     })
+                    const resultat = await avecDelai(modele.generateContent({
+                        contents: [{ role: 'user', parts: [{ text }] }],
+                        // Désactive les filtres qui font "refuser" l'IA sur des sujets anodins
+                        safetySettings: [
+                            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+                            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+                            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+                            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' }
+                        ]
+                    }), delaiPour(30000), 'gemini')
                     const texte = (await resultat.response).text()
                     if (texte) {
                         global.db.geminiIndex = (index + 1) % clefsGemini.length
@@ -215,15 +323,20 @@ global.getAIResponse = async (text, provider = 'auto') => {
     const essayerWisdomGate = async () => {
         if (clefsWG.length === 0) return null
         for (let i = 0; i < clefsWG.length; i++) {
+            if (budgetEpuise()) return null
             const index = (global.db.geminiIndex + i) % clefsWG.length
             const client = new OpenAI({ apiKey: clefsWG[index], baseURL: 'https://wisdom-gate.juheapi.com/v1' })
             for (const modeleId of ['deepseek-r1', 'deepseek-v3.1-terminus', 'gpt-5-nano']) {
+                if (budgetEpuise()) return null
                 try {
-                    const completion = await client.chat.completions.create({
+                    const completion = await avecDelai(client.chat.completions.create({
                         model: modeleId,
-                        messages: [{ role: 'user', content: text }],
+                        messages: [
+                            { role: 'system', content: sys },
+                            { role: 'user', content: text }
+                        ],
                         max_tokens: 1000
-                    })
+                    }), delaiPour(30000), 'wisdomgate')
                     const reponse = completion.choices?.[0]?.message?.content
                     if (reponse) return reponse
                 } catch (err) {
@@ -236,21 +349,37 @@ global.getAIResponse = async (text, provider = 'auto') => {
     }
 
     // Sélection du fournisseur IA
+    // Un fournisseur explicite qui échoue retombe sur la chaîne complète
+    // au lieu de renvoyer une erreur immédiate.
+    const chaineComplete = async () => {
+        if (!budgetEpuise()) { const r1 = await essayerOpenRouter(); if (r1) return { out: r1, provider: 'meta-llama' } }
+        if (!budgetEpuise()) { const r2 = await essayerGemini(); if (r2) return { out: r2, provider: 'gemini' } }
+        if (!budgetEpuise()) { const r3 = await essayerWisdomGate(); if (r3) return { out: r3, provider: 'wisdomgate' } }
+        return null
+    }
+
     if (provider === 'gemini') {
         const r = await essayerGemini(); if (r) return { out: r, provider: 'gemini' }
+        if (!budgetEpuise()) { const o = await essayerOpenRouter(); if (o) return { out: o, provider: 'meta-llama' } }
+        if (!budgetEpuise()) { const w = await essayerWisdomGate(); if (w) return { out: w, provider: 'wisdomgate' } }
     } else if (provider === 'meta' || provider === 'llama' || provider === 'openrouter') {
         const r = await essayerOpenRouter(); if (r) return { out: r, provider: 'meta-llama' }
+        if (!budgetEpuise()) { const g = await essayerGemini(); if (g) return { out: g, provider: 'gemini' } }
+        if (!budgetEpuise()) { const w = await essayerWisdomGate(); if (w) return { out: w, provider: 'wisdomgate' } }
     } else if (provider === 'wisdom' || provider === 'wg') {
         const r = await essayerWisdomGate(); if (r) return { out: r, provider: 'wisdomgate' }
+        if (!budgetEpuise()) { const o = await essayerOpenRouter(); if (o) return { out: o, provider: 'meta-llama' } }
+        if (!budgetEpuise()) { const g = await essayerGemini(); if (g) return { out: g, provider: 'gemini' } }
     } else {
         // Mode automatique : OpenRouter → Gemini → WisdomGate
-        const r1 = await essayerOpenRouter(); if (r1) return { out: r1, provider: 'meta-llama' }
-        const r2 = await essayerGemini(); if (r2) return { out: r2, provider: 'gemini' }
-        const r3 = await essayerWisdomGate(); if (r3) return { out: r3, provider: 'wisdomgate' }
+        const r = await chaineComplete(); if (r) return r
     }
     return { error: 'TOUS_IA_ECHOUES' }
 }
 global.getGeminiResponse = global.getAIResponse
+// Alias historiques utilisés par plusieurs commandes de jeux
+global.getDeepSeekResponse = (text, sys) => global.getAIResponse(text, 'auto', sys)
+global.getMetaAIResponse = (text, sys) => global.getAIResponse(text, 'meta', sys)
 
 // ─────────────────────────────────────────────────────────
 // PLANIFICATEUR OUVERTURE/FERMETURE DES GROUPES
@@ -280,6 +409,20 @@ setInterval(() => {
     if (url) axios.get(`${url}/health`).catch(() => { })
 }, 45000)
 
+// Extraction d'une vue-unique lors de la réaction du propriétaire au message
+// (feature inspirée du bot de référence : "view-once extraction on reaction")
+const _viewOnceCache = new Map()
+setInterval(() => {
+    // Nettoyage périodique (tous les 30 min, garde au moins 60 messages récents)
+    if (_viewOnceCache.size > 120) {
+        const keys = Array.from(_viewOnceCache.keys()).slice(-60)
+        const keep = new Set(keys)
+        for (const k of Array.from(_viewOnceCache.keys())) {
+            if (!keep.has(k)) _viewOnceCache.delete(k)
+        }
+    }
+}, 1800000)
+
 // ─────────────────────────────────────────────────────────
 // DÉMARRAGE DU BOT
 // ─────────────────────────────────────────────────────────
@@ -293,18 +436,34 @@ async function startBot() {
         proto,
         getContentType,
         makeCacheableSignalKeyStore,
-        Browsers
+        Browsers,
+        downloadContentFromMessage
     } = await getBaileys()
 
-    // Rendre getContentType accessible globalement pour le handler
+    // Rendre getContentType et downloadContentFromMessage accessibles globalement
     global._baileysGetContentType = getContentType
+    global._downloadContentFromMessage = downloadContentFromMessage
 
     // Dossier de session stable
     const dossierSession = isVercel ? '/tmp/session' : path.join(__dirname, 'session')
     if (!fs.existsSync(dossierSession)) fs.mkdirSync(dossierSession, { recursive: true })
 
+    // Restauration de la session depuis SESSION_DATA (base64) pour les
+    // hébergeurs éphémères type Render/Vercel (voir commande .session)
+    if (process.env.SESSION_DATA) {
+        try {
+            const credsPath = path.join(dossierSession, 'creds.json')
+            const contenu = Buffer.from(process.env.SESSION_DATA, 'base64').toString('utf-8')
+            JSON.parse(contenu)
+            fs.writeFileSync(credsPath, contenu)
+            console.log('[SESSION] Session restaurée depuis SESSION_DATA.')
+        } catch (e) {
+            console.error('[SESSION] Restauration SESSION_DATA impossible :', e.message)
+        }
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState(dossierSession)
-    const { version } = await fetchLatestBaileysVersion()
+    const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1015901307] }))
 
     const sock = makeWASocket({
         version,
@@ -315,6 +474,7 @@ async function startBot() {
         browser: Browsers ? Browsers.ubuntu('Chrome') : ['Ubuntu', 'Chrome', '124.0.0'],
         syncFullHistory: false,
         shouldSyncHistoryMessage: () => false,
+        shouldIgnoreJid: (jid) => jid?.includes('@newsletter') || jid?.endsWith('@@broadcast'),
         markOnlineOnConnect: true,
         generateHighQualityLinkPreview: false,
         // Keepalive pour éviter les déconnexions
@@ -397,7 +557,7 @@ async function startBot() {
             // ── OWNER DYNAMIQUE : lire le numéro réel de la session ──
             const jidConnecte = sock.user?.id ? sock.decodeJid(sock.user.id) : null
             if (jidConnecte) {
-                const numeroConnecte = jidConnecte.split('@')[0]
+                const numeroConnecte = global.jidToNumber(jidConnecte)
                 // Si pas de OWNER_NUMBER dans .env, utiliser le numéro de la session
                 if (!process.env.OWNER_NUMBER || global.owner[0] === '') {
                     global.owner = [numeroConnecte]
@@ -406,6 +566,8 @@ async function startBot() {
                     console.log(`[OWNER] Numéro depuis .env : ${global.owner[0]}`)
                 }
                 global.authorNum = jidConnecte
+                // LID (identifiant interne WhatsApp) pour les groupes migrés
+                global.ownerLid = global.jidToNumber(sock.user?.lid || '') || null
             }
 
             console.log(`[BOT] ✅ Connecté en tant que ${sock.user?.id?.split(':')[0]} | Owner: ${global.owner[0]}`)
@@ -441,9 +603,20 @@ async function startBot() {
         try {
             if (!isVercel && fs.existsSync(cheminDB)) {
                 const data = JSON.parse(fs.readFileSync(cheminDB, 'utf-8'))
-                global.db = { ...global.db, ...data, groups: { ...(data.groups || {}) } }
+                // On n'écrase pas l'objet global.db (il porte des accesseurs utiles) :
+                // on recopie champ par champ.
+                if (data.settings && typeof data.settings === 'object') {
+                    global.db.settings = { ...global.db.settings, ...data.settings }
+                }
+                if (Array.isArray(data.mods)) global.db.mods = data.mods
+                if (data.groups && typeof data.groups === 'object') global.db.groups = data.groups
+                // Les jeux en cours sont éphémères : on ne les restaure JAMAIS,
+                // sinon une partie figée d'un ancien démarrage reste collée au chat.
+                delete data.games
+                delete data.jeux
                 global.db.msgStore = new Map()
                 global.db.geminiIndex = 0
+                global.db.games = {}
                 console.log('[DB] Base de données chargée.')
             } else if (isVercel) {
                 console.log('[DB] Mode Vercel — base en mémoire uniquement.')
@@ -454,8 +627,12 @@ async function startBot() {
     const sauvegarderDB = () => {
         if (isVercel) return
         try {
-            const donnees = { ...global.db }
-            delete donnees.msgStore
+            const donnees = {
+                settings: global.db.settings,
+                mods: global.db.mods,
+                groups: global.db.groups
+                // games et msgStore volontairement non persistés
+            }
             fs.writeFileSync(cheminDB, JSON.stringify(donnees, null, 2))
         } catch (e) { console.error('[DB] Erreur sauvegarde :', e) }
     }
@@ -486,6 +663,21 @@ async function startBot() {
             for (const m of chatUpdate.messages) {
                 if (!m.message) continue
 
+                // Mémoriser les messages "vue unique" pour permettre l'extraction
+                // par réaction du propriétaire (voir messages.reaction plus bas)
+                try {
+                    const conteneur = m.message?.ephemeralMessage?.message || m.message
+                    const vo = conteneur?.viewOnceMessage ||
+                        conteneur?.viewOnceMessageV2 ||
+                        conteneur?.viewOnceMessageV2Extension
+                    if (vo) {
+                        _viewOnceCache.set(m.key.id, m)
+                        if (_viewOnceCache.size > 120) {
+                            _viewOnceCache.delete(_viewOnceCache.keys().next().value)
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+
                 // Gestion des statuts WhatsApp
                 if (m.key?.remoteJid === 'status@broadcast') {
                     const exp = sock.decodeJid(m.key.participant || m.key.remoteJid)
@@ -506,6 +698,105 @@ async function startBot() {
                 handler(sock, m, chatUpdate).catch(err => console.error('[ERREUR] Handler :', err))
             }
         } catch (err) { console.error('[ERREUR] messages.upsert :', err) }
+    })
+
+    // ── EXTRACTION DES VUES UNIQUES PAR RÉACTION DU PROPRIÉTAIRE ──
+    // Réagissez 🔓 (ou n'importe quel emoji) sur un message vue-unique pour
+    // récupérer le média en privé, sans spammer le groupe.
+    sock.ev.on('messages.reaction', async (reactions) => {
+        try {
+            if (!Array.isArray(reactions)) return
+            for (const reaction of reactions) {
+                const key = reaction?.key
+                if (!key?.id) continue
+
+                // Seul le propriétaire (ou le bot lui-même) déclenche l'extraction
+                // NB : dans l'événement Baileys, `key` = message RÉAGI (la cible)
+                //      et `reaction.key` = message de RÉACTION (l'auteur du clic).
+                const cleReacteur = reaction.key || {}
+                const reacteur = cleReacteur.participant || cleReacteur.remoteJid || key.participant || key.remoteJid
+                const estProprio =
+                    !!cleReacteur.fromMe ||
+                    global.sameJid(reacteur, global.ownerJid()) ||
+                    global.sameJid(reacteur, global.ownerLid) ||
+                    global.sameJid(reacteur, sock.user?.id) ||
+                    global.sameJid(reacteur, sock.user?.lid)
+
+                if (!estProprio) continue
+
+                const archive = _viewOnceCache.get(key.id)
+                if (!archive) continue
+
+                const conteneur = archive.message?.ephemeralMessage?.message || archive.message
+                const vo = conteneur?.viewOnceMessage ||
+                    conteneur?.viewOnceMessageV2 ||
+                    conteneur?.viewOnceMessageV2Extension
+                if (!vo?.message) continue
+
+                const interne = vo.message
+                const typeMedia = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage']
+                    .find(t => interne[t])
+                if (!typeMedia) continue
+
+                console.log(`[VUE-UNIQUE] Extraction de ${key.id} par le propriétaire`)
+                const media = interne[typeMedia]
+                const kind = typeMedia.replace('Message', '')
+                const flux = await downloadContentFromMessage(media, kind)
+                let buffer = Buffer.from([])
+                for await (const morceau of flux) buffer = Buffer.concat([buffer, morceau])
+
+                const jidProprio = global.ownerJid() || sock.user.id.split(':')[0] + '@s.whatsapp.net'
+                const auteur = archive.pushName || global.jidToNumber(key.participant || key.remoteJid) || 'inconnu'
+
+                const options =
+                    kind === 'image' ? { image: buffer, caption: `🔓 *Vue unique récupérée*\n👤 De : ${auteur}` } :
+                        kind === 'video' ? { video: buffer, caption: `🔓 *Vue unique récupérée*\n👤 De : ${auteur}` } :
+                            kind === 'audio' ? { audio: buffer, mimetype: media.mimetype || 'audio/ogg; codecs=opus', ptt: media.ptt } :
+                                { document: buffer, fileName: media.fileName || `viewonce_${Date.now()}`, caption: `🔓 *Vue unique récupérée*\n👤 De : ${auteur}` }
+
+                await sock.sendMessage(jidProprio, options)
+
+                // Accusé visuel sur le message lui-même (sans rien envoyer au groupe)
+                if (key.remoteJid && key.remoteJid !== 'status@broadcast') {
+                    await sock.sendMessage(key.remoteJid, { react: { text: '🔓', key } })
+                }
+                _viewOnceCache.delete(key.id)
+            }
+        } catch (e) {
+            console.error('[VUE-UNIQUE] Erreur extraction :', e.message)
+        }
+    })
+
+    // ── SECRÉTAIRE AUTOMATIQUE : appel manqué/raté → réponse auto + notification owner ──
+    sock.ev.on('call', async (callEvents) => {
+        try {
+            if (!Array.isArray(callEvents)) return
+            for (const appel of callEvents) {
+                const termine = ['reject', 'timeout', 'terminate'].includes(appel.status)
+                if (!termine) continue
+                if (appel.isGroup) continue
+
+                const appelant = appel.from
+                if (!appelant) continue
+
+                console.log(`[APPEL] Appel manqué de ${appelant}`)
+
+                const jidProprio = global.ownerJid() || sock.user.id.split(':')[0] + '@s.whatsapp.net'
+                const messageIA = "Désolé, je ne peux pas répondre pour le moment. Je vous rappelle dès que possible."
+
+                // Réponse auto courte à l'appelant (toléré si échec)
+                try {
+                    await sock.sendMessage(appelant, { text: `🤖 *Assistant Ely*\n\n${messageIA}` })
+                } catch (e) { /* ignore */ }
+
+                await sock.sendMessage(jidProprio, {
+                    text: `📞 *APPEL MANQUÉ*\n━━━━━━━━━━━━━━━━\n👤 De : @${global.jidToNumber(appelant)}\n🤖 Réponse auto envoyée à l'appelant.`,
+                    mentions: [appelant]
+                })
+            }
+        } catch (e) {
+            console.error('[APPEL] Erreur gestionnaire :', e.message)
+        }
     })
 
     return sock

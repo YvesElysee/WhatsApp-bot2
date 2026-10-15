@@ -1,47 +1,54 @@
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys')
+const { getBaileys } = require('../../lib/baileys')
 
 module.exports = {
     name: 'extract',
     category: 'media',
-    desc: 'Extrait le texte d\'une image (OCR).',
-    run: async (sock, m, args, { reply }) => {
-        if (!m.quoted) return reply('❌ Répondez à un message ViewOnce !')
+    desc: 'Récupère le média d\'un message cité (dont les messages à vue unique).',
+    commands: ['extract', 'extrait', 'recup'],
+    run: async (sock, m, args, { reply, tempDir }) => {
+        if (!m.quoted) return reply('❌ Répondez au message à récupérer avec `.extract`.')
 
-        // Use the unwrapped message from handler for reliability
+        // Le handler déplie déjà les enveloppes vue-unique / éphémères
         const { msg, type } = m.quoted.unwrapped || {}
-        // fallback if unwrapped not present on quoted
         const targetType = type || m.quoted.mtype
-        const targetMsg = msg || (m.quoted.msg || m.quoted)
+        const targetMsg = msg || m.quoted.msg
 
-        if (!/imageMessage|videoMessage|audioMessage/.test(targetType)) {
-            return reply('❌ Ce message n\'est pas un média à vue unique (ou déjà ouvert).')
+        if (!targetMsg || !/imageMessage|videoMessage|audioMessage|documentMessage|stickerMessage/.test(targetType)) {
+            return reply('❌ Aucun média récupérable dans le message cité.')
         }
 
-        reply('🔄 Extraction en cours...')
+        await reply('🔄 Récupération du média en cours...')
+
         try {
-            const mediaType = targetType.replace('Message', '')
-            const stream = await downloadContentFromMessage(targetMsg, mediaType)
+            const { downloadContentFromMessage } = await getBaileys()
+            const kind = targetType.replace('Message', '')
+            const flux = await downloadContentFromMessage(targetMsg, kind)
             let buffer = Buffer.from([])
-            for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]) }
+            for await (const chunk of flux) buffer = Buffer.concat([buffer, chunk])
 
-            const ownerNumber = global.authorNum || global.owner[0].endsWith('@s.whatsapp.net') ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
-            const target = global.db.settings.privateMode ? ownerNumber : m.key.remoteJid
+            if (!buffer.length) throw new Error('Média vide')
 
-            // Plus de message de confirmation dans le groupe si mode privé activé
-            if (target === m.key.remoteJid) {
-                // notification optionnelle ou rien
-            }
+            // En mode privé, tout part en PV au propriétaire, sinon dans le chat d'origine
+            const cible = (global.db.settings.privateMode ? global.ownerJid() : null) || m.key.remoteJid
 
-            if (targetType === 'imageMessage') {
-                await sock.sendMessage(target, { image: buffer, caption: '✅ Extrait par Ely Bot' }, { quoted: m })
-            } else if (targetType === 'videoMessage') {
-                await sock.sendMessage(target, { video: buffer, caption: '✅ Extrait par Ely Bot' }, { quoted: m })
-            } else if (targetType === 'audioMessage') {
-                await sock.sendMessage(target, { audio: buffer, mimetype: 'audio/mp4' }, { quoted: m })
+            if (kind === 'image') {
+                await sock.sendMessage(cible, { image: buffer, caption: '✅ Média récupéré par Ely Bot' }, { quoted: cible === m.key.remoteJid ? m : undefined })
+            } else if (kind === 'video') {
+                await sock.sendMessage(cible, { video: buffer, caption: '✅ Média récupéré par Ely Bot' }, { quoted: cible === m.key.remoteJid ? m : undefined })
+            } else if (kind === 'audio') {
+                await sock.sendMessage(cible, { audio: buffer, mimetype: targetMsg.mimetype || 'audio/ogg; codecs=opus', ptt: !!targetMsg.ptt }, { quoted: cible === m.key.remoteJid ? m : undefined })
+            } else if (kind === 'sticker') {
+                await sock.sendMessage(cible, { sticker: buffer }, { quoted: cible === m.key.remoteJid ? m : undefined })
+            } else {
+                await sock.sendMessage(cible, {
+                    document: buffer,
+                    fileName: targetMsg.fileName || `extrait_${Date.now()}`,
+                    caption: '✅ Document récupéré par Ely Bot'
+                }, { quoted: cible === m.key.remoteJid ? m : undefined })
             }
         } catch (e) {
-            console.error(e)
-            reply('❌ Échec de l\'extraction. Le média a peut-être expiré.')
+            console.error('[EXTRACT]', e.message)
+            reply('❌ Échec de la récupération. Le média a peut-être expiré (vue unique déjà ouverte).')
         }
     }
 }

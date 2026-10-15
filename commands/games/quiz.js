@@ -11,57 +11,68 @@ const fallbacks = [
 module.exports = {
     name: 'quiz',
     category: 'games',
-    desc: 'Jeu de quiz de culture générale.',
+    desc: 'Quiz de culture générale (tout le monde répond).',
     run: async (sock, m, args, { reply, getAIResponse }) => {
         const from = m.key.remoteJid
-        if (global.db.games[from]) return reply('❌ Un jeu est déjà en cours !')
+        if (global.db.games[from]) return reply('❌ Un jeu est déjà en cours ici ! Utilisez `.stopgame`.')
 
-        reply('🎲 Génération d\'un Quiz...')
+        await reply('🎲 Génération d\'un quiz...')
 
-        let quiz
+        let quiz = null
         try {
-            const prompt = "Génère une question de culture générale difficile en français avec 4 choix (A, B, C, D) et indique la lettre de la bonne réponse. Réponds UNIQUEMENT en JSON: {\"q\": \"...\", \"a\": \"...\", \"b\": \"...\", \"c\": \"...\", \"d\": \"...\", \"correct\": \"A\"}"
-            const result = await getAIResponse(prompt)
+            const prompt =
+                'Génère une question de culture générale en français avec 4 choix (A, B, C, D) ' +
+                'et indique la lettre de la bonne réponse. ' +
+                'Réponds UNIQUEMENT en JSON strict : ' +
+                '{"q":"...","a":"...","b":"...","c":"...","d":"...","correct":"A"}'
 
-            if (result) {
-                const cleanJson = result.replace(/```json|```/g, '').trim()
-                const jsonStart = cleanJson.indexOf('{')
-                const jsonEnd = cleanJson.lastIndexOf('}')
-                if (jsonStart !== -1 && jsonEnd !== -1) {
-                    quiz = JSON.parse(cleanJson.substring(jsonStart, jsonEnd + 1))
+            const res = await getAIResponse(prompt)
+            const brut = res?.out || (typeof res === 'string' ? res : '')
+            if (brut) {
+                const propre = String(brut).replace(/```json|```/g, '').trim()
+                const debut = propre.indexOf('{')
+                const fin = propre.lastIndexOf('}')
+                if (debut !== -1 && fin !== -1) {
+                    try { quiz = JSON.parse(propre.substring(debut, fin + 1)) } catch (e) { quiz = null }
                 }
             }
         } catch (e) {
-            console.error('[QUIZ AI ERROR]', e)
+            console.error('[QUIZ IA]', e.message)
         }
 
-        // Fallback if AI fails or returns invalid JSON
-        if (!quiz || !quiz.q || !quiz.correct) {
-            console.log('[QUIZ] Using fallback question.')
+        // Repli si l'IA échoue ou renvoie un JSON invalide
+        if (!quiz || !quiz.q || !quiz.correct || !quiz.a || !quiz.b || !quiz.c || !quiz.d) {
             quiz = fallbacks[Math.floor(Math.random() * fallbacks.length)]
         }
 
-        const msg = `📝 *QUIZ MULTIJOUEUR*\n\n*Question:* ${quiz.q}\n\nA. ${quiz.a}\nB. ${quiz.b}\nC. ${quiz.c}\nD. ${quiz.d}\n\n👉 *Le premier qui répond gagne !*`
+        const correct = String(quiz.correct).trim().toUpperCase().charAt(0)
+
+        const msg =
+            `📝 *QUIZ MULTIJOUEUR*\n\n` +
+            `*Question :* ${quiz.q}\n\n` +
+            `A. ${quiz.a}\nB. ${quiz.b}\nC. ${quiz.c}\nD. ${quiz.d}\n\n` +
+            `👉 *Le premier à répondre gagne !* (tapez la lettre, ex: \`C\`)`
 
         global.db.games[from] = {
             type: 'quiz',
-            correct: quiz.correct.toUpperCase().trim(),
-            scores: {},
-            listener: async (sock, m, { body, sender, reply }) => {
-                const game = global.db.games[from]
-                const answer = body.toUpperCase().trim()
+            correct,
+            listener: async (sock2, m2, { body, sender, reply: r }) => {
+                const partie = global.db.games[from]
+                if (!partie) return
+                const answer = String(body || '').trim().toUpperCase()
 
-                // Flexible answer matching (A, A., or A [text])
-                const isCorrect = answer === game.correct ||
-                    answer.startsWith(game.correct + '.') ||
-                    answer.startsWith(game.correct + ' ')
+                const isCorrect =
+                    answer === partie.correct ||
+                    answer.startsWith(partie.correct + '.') ||
+                    answer.startsWith(partie.correct + ' ')
 
                 if (isCorrect) {
-                    reply(`🎉 @${sender.split('@')[0]} a trouvé la bonne réponse ! C'était bien *${game.correct}*.`, { mentions: [sender] })
+                    await r(`🎉 @${global.jidToNumber(sender)} a trouvé la bonne réponse ! C'était bien *${partie.correct}*.`, { mentions: [sender] })
                     delete global.db.games[from]
                 }
             }
         }
-        reply(msg)
+
+        await reply(msg)
     }
 }

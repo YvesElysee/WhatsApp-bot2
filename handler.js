@@ -78,6 +78,12 @@ module.exports = async (sock, m, chatUpdate) => {
         } else if (typeMsg === 'viewOnceMessage') {
             msg = msg.viewOnceMessage.message
             typeMsg = getContentType(msg)
+        } else if (typeMsg === 'viewOnceMessageV2Extension') {
+            msg = msg.viewOnceMessageV2Extension.message
+            typeMsg = getContentType(msg)
+        } else if (typeMsg === 'documentWithCaptionMessage') {
+            msg = msg.documentWithCaptionMessage.message
+            typeMsg = getContentType(msg)
         }
 
         m.unwrapped = { msg, type: typeMsg }
@@ -98,12 +104,14 @@ module.exports = async (sock, m, chatUpdate) => {
         // global.owner est mis à jour dynamiquement dans index.js
         // ─────────────────────────────────────────────────────────
         const listeMods = global.db?.mods || []
-        const ownerNumero = numeroBot ? numeroBot.split('@')[0] : (global.owner?.[0] || '')
+        const ownerNumero = numeroBot ? global.jidToNumber(numeroBot) : global.jidToNumber(global.owner?.[0] || '')
 
         const estProprietaire = m.key.fromMe ||  // Message envoyé par le bot lui-même
-            global.owner.includes(idExpediteur) ||
-            listeMods.some(mod => sock.decodeJid(mod)?.split('@')[0] === idExpediteur) ||
-            (ownerNumero && idExpediteur === ownerNumero)
+            (!!ownerNumero && idExpediteur === ownerNumero) ||
+            (!!global.jidToNumber(global.owner?.[0] || '') &&
+                idExpediteur === global.jidToNumber(global.owner[0])) ||
+            (!!global.ownerLid && idExpediteur === global.ownerLid) ||
+            listeMods.some(mod => global.jidToNumber(mod) && global.jidToNumber(mod) === idExpediteur)
 
         // --- Stockage des messages (pour anti-suppression et purge) ---
         if (typeMsg && typeMsg !== 'protocolMessage') {
@@ -117,26 +125,27 @@ module.exports = async (sock, m, chatUpdate) => {
         if (typeMsg === 'protocolMessage' && msg.protocolMessage.type === 0) {
             const msgCache = global.db.msgStore.get(msg.protocolMessage.key.id)
             if (msgCache && (global.db.settings.antidelete || (msgCache.isStatus && global.db.settings.statusAntidelete))) {
-                const jidOwner = global.owner[0]?.endsWith('@s.whatsapp.net')
-                    ? global.owner[0] : (global.owner[0] || ownerNumero) + '@s.whatsapp.net'
+                const jidOwner = global.ownerJid() || (ownerNumero ? ownerNumero + '@s.whatsapp.net' : null)
+                if (!jidOwner) return
 
+                const numAuteur = global.jidToNumber(msgCache.sender)
                 let texteNotif = `🚨 *ANTI-SUPPRESSION* 🚨\n\n`
                 texteNotif += msgCache.isStatus
-                    ? `👤 *Statut de* : @${msgCache.sender.split('@')[0]}\n📝 Statut supprimé.`
-                    : `👤 @${msgCache.sender.split('@')[0]}\n📝 Message supprimé à l'instant.`
+                    ? `👤 *Statut de* : @${numAuteur}\n📝 Statut supprimé.`
+                    : `👤 @${numAuteur}\n📝 Message supprimé à l'instant.`
 
                 // En mode privé OU si c'est un statut : envoyer au propriétaire
                 const cible = (msgCache.isStatus || global.db.settings.privateMode) ? jidOwner : from
 
                 await sock.sendMessage(cible, { text: texteNotif, mentions: [msgCache.sender] }, { quoted: msgCache.m })
-                await sock.copyNForward(cible, msgCache.m, true)
+                await sock.copyNForward(cible, msgCache.m, true).catch(() => { })
 
                 if (!msgCache.isStatus && from !== jidOwner && !global.db.settings.privateMode) {
                     await sock.sendMessage(jidOwner, {
-                        text: `🚨 *AUDIT ANTI-SUPPRESSION*\n📍 Chat : ${from}\n👤 Auteur : @${msgCache.sender.split('@')[0]}`,
+                        text: `🚨 *AUDIT ANTI-SUPPRESSION*\n📍 Chat : ${from}\n👤 Auteur : @${numAuteur}`,
                         mentions: [msgCache.sender]
                     })
-                    await sock.copyNForward(jidOwner, msgCache.m, true)
+                    await sock.copyNForward(jidOwner, msgCache.m, true).catch(() => { })
                 }
             }
         }
@@ -176,18 +185,9 @@ module.exports = async (sock, m, chatUpdate) => {
             const donneesGroupe = global.getGroupDB ? global.getGroupDB(from) : null
 
             if (donneesGroupe?.antilink) {
-                let estAdminGroupe = false
-                try {
-                    const meta = await sock.groupMetadata(from).catch(() => null)
-                    if (meta) {
-                        const admins = meta.participants
-                            .filter(p => p.admin !== null && p.admin !== undefined)
-                            .map(p => sock.decodeJid(p.id))
-                        estAdminGroupe = admins.includes(expediteur) || estProprietaire
-                    }
-                } catch (e) {
-                    estAdminGroupe = estProprietaire
-                }
+                // Métadonnées mises en cache (60 s) : plus d'appel réseau par message
+                const meta = await global.getGroupMetadata(sock, from).catch(() => null)
+                const estAdminGroupe = (meta && global.estAdminDans(meta, expediteur)) || estProprietaire
 
                 if (!estAdminGroupe && m.text && regexLien.test(m.text)) {
                     regexLien.lastIndex = 0
@@ -241,8 +241,11 @@ module.exports = async (sock, m, chatUpdate) => {
                 msg: contextInfo.quotedMessage[typeQuote],
                 mtype: typeQuote
             }
-            if (typeQuote === 'viewOnceMessageV2' || typeQuote === 'viewOnceMessage') {
+            if (['viewOnceMessageV2', 'viewOnceMessage', 'viewOnceMessageV2Extension'].includes(typeQuote)) {
                 const inner = m.quoted.message[typeQuote].message
+                m.quoted.unwrapped = { msg: inner, type: getContentType(inner) }
+            } else if (typeQuote === 'ephemeralMessage') {
+                const inner = m.quoted.message.ephemeralMessage.message
                 m.quoted.unwrapped = { msg: inner, type: getContentType(inner) }
             }
         } else {
@@ -254,16 +257,21 @@ module.exports = async (sock, m, chatUpdate) => {
 
         // --- Traitement des messages non-commandes ---
         if (!estCommande) {
-            // Listener de jeu actif
-            if (global.db.jeux?.[from]?.listener) {
-                await global.db.jeux[from].listener(sock, m, {
-                    body: m.text,
-                    sender: expediteur,
-                    reply: (content, options = {}) => {
-                        if (typeof content === 'string') return sock.sendMessage(from, { text: content, ...options }, { quoted: m })
-                        return sock.sendMessage(from, { ...content, ...options }, { quoted: m })
-                    }
-                }).catch(e => console.error('[DEBUG] Erreur listener jeu :', e))
+            // Listener de jeu actif (une seule partie par chat)
+            const jeuActif = global.db.games?.[from]
+            if (jeuActif?.listener) {
+                try {
+                    await jeuActif.listener(sock, m, {
+                        body: m.text,
+                        sender: expediteur,
+                        reply: (content, options = {}) => {
+                            if (typeof content === 'string') return sock.sendMessage(from, { text: content, ...options }, { quoted: m })
+                            return sock.sendMessage(from, { ...content, ...options }, { quoted: m })
+                        }
+                    })
+                } catch (e) {
+                    console.error('[JEU] Erreur listener :', e)
+                }
             }
 
             // Réaction automatique
@@ -275,12 +283,22 @@ module.exports = async (sock, m, chatUpdate) => {
             }
 
             // Chatbot : répond quand le bot est mentionné
-            const idBot = sock.user?.id.split(':')[0]
-            const estMentionne = m.mentionedJid.includes(idBot + '@s.whatsapp.net') || m.text.includes(idBot)
-            if (global.db.settings.chatbot && estMentionne && !m.key.fromMe) {
-                const reponse = await global.getAIResponse(m.text)
-                if (reponse?.out) {
-                    await sock.sendMessage(from, { text: `🤖 *ELY-AI* :\n\n${reponse.out}` }, { quoted: m })
+            const candidatsBot = [sock.user?.id, sock.user?.lid].filter(Boolean)
+            const estMentionne = (m.mentionedJid || []).some(j => candidatsBot.some(c => global.sameJid(j, c)))
+            const estAppeleParNom = !estMentionne && !!sock.user?.name && typeof m.text === 'string' && m.text.startsWith(sock.user.name)
+            if (global.db.settings.chatbot && (estMentionne || estAppeleParNom) && !m.key.fromMe) {
+                // L'IA publique respecte le réglage "IA propriétaire uniquement"
+                if (global.db.settings.aiOnly && !estProprietaire) {
+                    await sock.sendMessage(from, {
+                        text: '🔒 L\'IA est actuellement réservée au propriétaire du bot.'
+                    }, { quoted: m })
+                } else {
+                    const reponse = await global.getAIResponse(m.text)
+                    if (reponse?.out) {
+                        await sock.sendMessage(from, { text: `🤖 *ELY-AI* :\n\n${reponse.out}` }, { quoted: m })
+                    } else if (reponse?.error) {
+                        await sock.sendMessage(from, { text: '⚠️ Le service IA est momentanément indisponible, réessayez plus tard.' }, { quoted: m })
+                    }
                 }
             }
             return
@@ -302,47 +320,34 @@ module.exports = async (sock, m, chatUpdate) => {
         let proprietaireGroupe = ''
 
         if (estGroupe) {
-            // Récupération robuste avec retry
-            const recupererMeta = async (tentatives = 3, delai = 1000) => {
-                for (let essai = 0; essai < tentatives; essai++) {
-                    try {
-                        const meta = await sock.groupMetadata(from)
-                        if (meta?.participants?.length > 0) return meta
-                    } catch (e) {
-                        console.warn(`[VÉRIF-ADMIN] Tentative ${essai + 1} échouée : ${e.message}`)
-                    }
-                    if (essai < tentatives - 1) await new Promise(r => setTimeout(r, delai))
-                }
-                return null
+            // Métadonnées mises en cache (global.getGroupMetadata, TTL 60 s)
+            // → plus d'appel réseau ni de délais de retry à chaque commande.
+            let metaDonnees = await global.getGroupMetadata(sock, from)
+
+            if (!metaDonnees) {
+                // Une seule tentative forcee si le cache est vide
+                metaDonnees = await global.getGroupMetadata(sock, from, true).catch(() => null)
             }
 
-            try {
-                const metaDonnees = await recupererMeta()
-                if (metaDonnees) {
-                    const participants = metaDonnees.participants || []
-                    proprietaireGroupe = metaDonnees.owner ||
-                        participants.find(p => p.admin === 'superadmin')?.id || ''
+            if (metaDonnees) {
+                const participants = metaDonnees.participants || []
+                proprietaireGroupe = metaDonnees.owner ||
+                    participants.find(p => p.admin === 'superadmin')?.id ||
+                    participants.find(p => p.admin === 'superadmin')?.lid || ''
 
-                    // Tous les admins (admin + superadmin)
-                    const admins = participants
-                        .filter(v => v.admin === 'admin' || v.admin === 'superadmin')
-                        .map(v => sock.decodeJid(v.id))
+                // Comparaison par numéro (+ support @lid) pour l'expéditeur et le bot :
+                // évite les faux négatifs quand WhatsApp utilise des JID @lid.
+                estAdmin = global.estAdminDans(metaDonnees, expediteur) || estProprietaire
 
-                    const expediteurDecode = sock.decodeJid(expediteur)
+                // Le bot est admin si SON numéro (ou SON lid) est dans les admins
+                const candidatsBot = [numeroBot, sock.user?.id, sock.user?.lid].filter(Boolean)
+                botEstAdmin = candidatsBot.some(j => global.estAdminDans(metaDonnees, j))
 
-                    // L'expéditeur est admin si dans la liste OU s'il est propriétaire du bot
-                    estAdmin = admins.includes(expediteurDecode) || estProprietaire
-
-                    // Le bot est admin ?
-                    botEstAdmin = numeroBot ? admins.includes(numeroBot) : false
-
-                    console.log(`[VÉRIF-ADMIN] expéditeur=${expediteurDecode} | estAdmin=${estAdmin} | botAdmin=${botEstAdmin} | admins=[${admins.join(',')}]`)
-                } else {
-                    console.warn('[VÉRIF-ADMIN] Métadonnées introuvables — fallback estProprietaire')
-                    estAdmin = estProprietaire
+                if (process.env.DEBUG_ADMIN) {
+                    console.log(`[VÉRIF-ADMIN] expéditeur=${idExpediteur} | estAdmin=${estAdmin} | botAdmin=${botEstAdmin}`)
                 }
-            } catch (e) {
-                console.error('[VÉRIF-ADMIN-ERREUR]', e.message)
+            } else {
+                console.warn('[VÉRIF-ADMIN] Métadonnées introuvables — fallback estProprietaire')
                 estAdmin = estProprietaire
             }
         }
@@ -354,10 +359,13 @@ module.exports = async (sock, m, chatUpdate) => {
         const cibleJid = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
         if (cibleJid) {
             const cibleDecode = sock.decodeJid(cibleJid)
-            const estCibleProprietaire = global.owner.includes(cibleDecode.split('@')[0])
-            const estCibleProprietaireGroupe = cibleDecode === proprietaireGroupe
+            const estCibleProprietaire =
+                global.sameJid(cibleDecode, global.owner?.[0]) ||
+                global.sameJid(cibleDecode, global.ownerLid) ||
+                global.sameJid(cibleDecode, numeroBot)
+            const estCibleProprietaireGroupe = global.sameJid(cibleDecode, proprietaireGroupe)
 
-            if ((estCibleProprietaire || estCibleProprietaireGroupe) && !estProprietaire && cibleDecode !== sock.decodeJid(expediteur)) {
+            if ((estCibleProprietaire || estCibleProprietaireGroupe) && !estProprietaire && !global.sameJid(cibleDecode, expediteur)) {
                 return sock.sendMessage(from, {
                     text: '❌ Action interdite : vous ne pouvez pas utiliser de commandes contre le propriétaire.'
                 }, { quoted: m })
@@ -370,21 +378,24 @@ module.exports = async (sock, m, chatUpdate) => {
         // MODE PRIVÉ : toutes les réponses vont en PV
         // En mode privé, même dans un groupe, la réponse va au propriétaire
         // ─────────────────────────────────────────────────────────
-        const jidOwner = global.owner[0]?.endsWith('@s.whatsapp.net')
-            ? global.owner[0] : (global.owner[0] || ownerNumero) + '@s.whatsapp.net'
+        const jidOwner = global.ownerJid() || (ownerNumero ? ownerNumero + '@s.whatsapp.net' : from)
 
         const repondre = (contenu, options = {}) => {
             // En mode privé : toutes les réponses en PV propriétaire
             // En mode public : répondre dans le chat d'origine
             const cibleReponse = global.db.settings.privateMode ? jidOwner : from
-            if (typeof contenu === 'string') return sock.sendMessage(cibleReponse, { text: contenu, ...options }, { quoted: m })
-            return sock.sendMessage(cibleReponse, { ...contenu, ...options }, { quoted: m })
+            // On ne peut pas citer un message d'un autre chat
+            const opts = { ...options }
+            if (cibleReponse !== from) delete opts.quoted
+            if (typeof contenu === 'string') return sock.sendMessage(cibleReponse, { text: contenu, ...opts }, { quoted: cibleReponse === from ? m : undefined })
+            return sock.sendMessage(cibleReponse, { ...contenu, ...opts }, { quoted: cibleReponse === from ? m : undefined })
         }
 
         // Exécution de la commande
         await cmd.run(sock, m, args, {
             reply: repondre,
             text,
+            commande,
             isAdmins: estAdmin,
             isBotAdmins: botEstAdmin,
             isGroup: estGroupe,
@@ -392,6 +403,10 @@ module.exports = async (sock, m, chatUpdate) => {
             isOwner: estProprietaire,
             getAIResponse: global.getAIResponse,
             getGeminiResponse: global.getAIResponse,
+            getDeepSeekResponse: global.getDeepSeekResponse,
+            getMetaAIResponse: global.getMetaAIResponse,
+            downloadContentFromMessage: global._downloadContentFromMessage,
+            tempDir: global.tempDir,
             groupOwner: proprietaireGroupe,
             getGroupDB: global.getGroupDB
         }).catch(e => {
