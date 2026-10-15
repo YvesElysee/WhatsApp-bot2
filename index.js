@@ -73,6 +73,67 @@ io.on('connection', (socket) => {
 })
 
 // ─────────────────────────────────────────────────────────
+// JUMELAGE PAR CODE (PAIRING CODE) — gestionnaire UNIQUE
+// (avant : enregistré dans startBot() → un listener par reconnexion,
+//  les anciens utilisaient un socket mort → code invalide)
+// ─────────────────────────────────────────────────────────
+const NUMBER_PAIRING = String(process.env.PAIRING_NUMBER || '').replace(/[^0-9]/g, '')
+let socketCourant = null
+let dernierCodePairing = 0
+
+const AFFICHER_CODE = (code) => {
+    const L = 36
+    const centrer = (txt) => {
+        const vide = Math.max(0, L - txt.length)
+        const gauche = Math.floor(vide / 2)
+        return '║' + ' '.repeat(gauche) + txt + ' '.repeat(vide - gauche) + '║'
+    }
+    console.log('')
+    console.log('╔' + '═'.repeat(L) + '╗')
+    console.log(centrer(''))
+    console.log(centrer('  CODE DE JUMELAGE  '))
+    console.log(centrer(''))
+    console.log(centrer('   ' + code + '   '))
+    console.log(centrer(''))
+    console.log('╚' + '═'.repeat(L) + '╝')
+    console.log('')
+    console.log('📱 Sur votre téléphone :')
+    console.log('   WhatsApp → Réglages → Appareils connectés')
+    console.log('   → Connecter un appareil → Lier avec le numéro')
+    console.log('   → Saisissez le code ci-dessus (valable ~2 min)')
+    console.log('')
+}
+
+const demanderCodePairing = async (phone, force = false) => {
+    const sock = socketCourant
+    if (!sock) return false
+    if (sock.authState?.creds?.registered) return false
+    if (!force && Date.now() - dernierCodePairing < 90000) return false
+    dernierCodePairing = Date.now()
+    try {
+        const brut = await sock.requestPairingCode(phone)
+        const code = brut?.match(/.{1,4}/g)?.join('-') || brut
+        AFFICHER_CODE(code)
+        io.emit('pairing-code', code)
+        return true
+    } catch (e) {
+        console.error('[JUMELAGE] Impossible de générer le code :', e.message)
+        // On retente une fois après reconnexion du socket
+        setTimeout(() => {
+            if (!sock.authState?.creds?.registered) demanderCodePairing(phone, true).catch(() => { })
+        }, 8000)
+        return false
+    }
+}
+
+// Unique listener : utilise TOUJOURS le socket en cours
+process.on('request-pairing', (phone) => {
+    const num = String(phone || '').replace(/[^0-9]/g, '')
+    if (num.length < 10) return console.warn('[JUMELAGE] Numéro invalide :', phone)
+    demanderCodePairing(num, true)
+})
+
+// ─────────────────────────────────────────────────────────
 // BASE DE DONNÉES GLOBALE
 // ─────────────────────────────────────────────────────────
 global.db = {
@@ -462,6 +523,27 @@ async function startBot() {
         }
     }
 
+    // ── Session non finalisée (jumelage avorté) ─────────────────────────
+    // Une tentative de code de jumelage écrit `creds.me` SANS passer
+    // `registered: true`. Au redémarrage, Baileys voit `me` et tente un
+    // LOGIN au lieu d'une inscription → WhatsApp refuse → plus de QR et
+    // code de jumelage invalide. On repart proprement dans ce cas
+    // (AVANT le chargement du state, pour que Baileys le lise à jour).
+    try {
+        const credsPath = path.join(dossierSession, 'creds.json')
+        if (fs.existsSync(credsPath)) {
+            const creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'))
+            if (creds && creds.registered !== true && creds.me) {
+                delete creds.me
+                delete creds.pairingCode
+                fs.writeFileSync(credsPath, JSON.stringify(creds, null, 2))
+                console.log('[SESSION] Session non finalisée détectée (jumelage interrompu) → réinitialisation, nouveau QR/code à venir.')
+            }
+        }
+    } catch (e) {
+        console.warn('[SESSION] Vérification de session impossible :', e.message)
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState(dossierSession)
     const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1015901307] }))
 
@@ -485,6 +567,7 @@ async function startBot() {
     })
 
     socketPlanificateur = sock
+    socketCourant = sock
 
     // Décodage propre des JIDs WhatsApp
     sock.decodeJid = (jid) => {
@@ -517,11 +600,33 @@ async function startBot() {
     }
 
     // Gestion des événements de connexion
+    let qrAfficheTerminal = false
+
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update
         if (qr) {
             qrCodeData = await QRCode.toDataURL(qr)
             io.emit('qr', qrCodeData)
+
+            const nonConnecte = !sock.authState?.creds?.registered
+            if (nonConnecte) {
+                let codeEnvoye = false
+                if (NUMBER_PAIRING) {
+                    // PAIRING_NUMBER défini → code de jumelage généré automatiquement
+                    codeEnvoye = await demanderCodePairing(NUMBER_PAIRING)
+                }
+                if (!codeEnvoye && !qrAfficheTerminal) {
+                    // Repli (ou pas de PAIRING_NUMBER) : QR affiché DANS le terminal
+                    qrAfficheTerminal = true
+                    try {
+                        const ascii = await QRCode.toString(qr, { type: 'terminal', small: true })
+                        console.log('\n📱 Scannez ce QR : WhatsApp → Appareils connectés → Connecter un appareil\n')
+                        console.log(ascii)
+                        console.log('➡️  Ou saisissez votre numéro dans le panneau web : http://localhost:' + port)
+                        console.log('    pour recevoir un code de jumelage (onglet "Jumelage").\n')
+                    } catch (e) { /* qrcode ASCII indisponible */ }
+                }
+            }
         }
         if (connection === 'close') {
             connectionStatus = 'close'
@@ -533,8 +638,14 @@ async function startBot() {
             if (statusCode === DisconnectReason.connectionReplaced) {
                 console.log('[DÉCONNEXION] Session remplacée sur un autre appareil.'); process.exit(0)
             } else if (statusCode === DisconnectReason.loggedOut) {
-                console.log('[DÉCONNEXION] Déconnecté manuellement — supprimez le dossier session.')
-                // Ne pas redémarrer si déconnexion volontaire
+                // Session expirée/déconnectée : on repart à zéro proprement
+                // (sinon le bot reste bloqué en boucle sur une session morte)
+                console.log('[DÉCONNEXION] Session déconnectée — purge du dossier session et redémarrage...')
+                try {
+                    fs.rmSync(dossierSession, { recursive: true, force: true })
+                    fs.mkdirSync(dossierSession, { recursive: true })
+                } catch (e) { }
+                setTimeout(() => { botDemarre = true; startBot() }, 4000)
             } else if (statusCode === DisconnectReason.badSession) {
                 console.log('[DÉCONNEXION] Session corrompue — suppression et redémarrage...')
                 try {
@@ -582,16 +693,8 @@ async function startBot() {
         }
     })
 
-    // Gestionnaire de code de jumelage
-    process.on('request-pairing', async (phone, socket) => {
-        if (!sock.authState.creds.registered) {
-            try {
-                let code = await sock.requestPairingCode(phone)
-                code = code?.match(/.{1,4}/g)?.join('-') || code
-                socket.emit('pairing-code', code)
-            } catch (e) { socket.emit('log', 'Erreur code : ' + e.message) }
-        } else { socket.emit('log', 'Déjà connecté !') }
-    })
+    // Gestionnaire de code de jumelage : maintenant UNIQUE et globale
+    // (voir demanderCodePairing ci-dessus) — plus d'ajout par reconnexion.
 
     sock.ev.on('creds.update', saveCreds)
     sock.public = true
