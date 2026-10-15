@@ -33,8 +33,16 @@ module.exports = {
         await reply(`${emoji} *Ely AI réfléchit...*`)
 
         try {
-            // Appel au système multi-IA avec le fournisseur sélectionné
-            const resultat = await getAIResponse(text, fournisseur)
+            // Mémoire : l'IA relit les derniers échanges de ce chat
+            const from = m.key.remoteJid
+            const historique = global.getHistorique(from)
+            const resultat = await getAIResponse(text, fournisseur, null, historique)
+
+            // On retient l'échange pour la suite de la discussion
+            if (resultat.out) {
+                global.ajouterHistorique(from, 'user', text)
+                global.ajouterHistorique(from, 'bot', resultat.out)
+            }
 
             if (resultat.out) {
                 // Étiquettes lisibles pour chaque fournisseur IA

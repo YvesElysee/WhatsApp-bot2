@@ -259,6 +259,19 @@ module.exports = async (sock, m, chatUpdate) => {
         if (!estCommande) {
             // Listener de jeu actif (une seule partie par chat)
             const jeuActif = global.db.games?.[from]
+
+            // Mémoire IA : on retient TOUS les échanges naturels du chat
+            // (hors parties de jeu) pour que l'IA suive la conversation
+            // sans perdre le contexte, même sans être mentionnée.
+            // En groupe, on préfixe par le nom de l'auteur pour que l'IA
+            // sache "qui a dit quoi".
+            const texteHistorique = estGroupe
+                ? `[${m.pushName || global.jidToNumber(expediteur)}] ${m.text}`
+                : m.text
+            if (m.text && !m.key.fromMe && !jeuActif) {
+                global.ajouterHistorique(from, 'user', texteHistorique)
+            }
+
             if (jeuActif?.listener) {
                 try {
                     await jeuActif.listener(sock, m, {
@@ -293,8 +306,14 @@ module.exports = async (sock, m, chatUpdate) => {
                         text: '🔒 L\'IA est actuellement réservée au propriétaire du bot.'
                     }, { quoted: m })
                 } else {
-                    const reponse = await global.getAIResponse(m.text)
+                    // La question courante vient d'être enregistrée plus haut :
+                    // on l'exclut de l'historique (elle est passée dans `text`).
+                    const hist = global.getHistorique(from)
+                    const dernier = hist[hist.length - 1]
+                    const base = dernier && dernier.contenu === texteHistorique ? hist.slice(0, -1) : hist
+                    const reponse = await global.getAIResponse(m.text, 'auto', null, base)
                     if (reponse?.out) {
+                        global.ajouterHistorique(from, 'bot', reponse.out)
                         await sock.sendMessage(from, { text: `🤖 *ELY-AI* :\n\n${reponse.out}` }, { quoted: m })
                     } else if (reponse?.error) {
                         await sock.sendMessage(from, { text: '⚠️ Le service IA est momentanément indisponible, réessayez plus tard.' }, { quoted: m })

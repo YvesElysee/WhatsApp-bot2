@@ -27,6 +27,7 @@ module.exports = {
         menu += `┆ ✨ *.ai* / *.ely* — IA automatique\n`
         menu += `┆ 🌍 *.translate* — Traducteur multilingue\n`
         menu += `┆ 🎙️ *.stt* — Audio → Texte\n`
+        menu += `┆ 🧠 *.oublier* — Effacer la mémoire de l'IA\n`
         menu += `╰──────────────────────────\n\n`
 
         // ── Media Section ──────────────────────────────────────
@@ -62,6 +63,7 @@ module.exports = {
         menu += `┆ 🧠 *.quiz* — Quiz de culture générale\n`
         menu += `┆ 🔤 *.motgame* — Mot mélangé\n`
         menu += `┆ 🪙 *.pileface* — Pile ou Face\n`
+        menu += `┆ 🎚️ *.niveau* — Difficulté des jeux\n`
         menu += `┆ 🛑 *.stopgame* — Arrêter le jeu en cours\n`
         menu += `╰──────────────────────────\n\n`
 

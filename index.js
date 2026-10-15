@@ -158,7 +158,10 @@ global.db = {
     },
     mods: [],
     msgStore: new Map(),
-    geminiIndex: 0
+    geminiIndex: 0,
+    // Mémoire conversationnelle de l'IA (par chat) et niveaux de jeu
+    historique: {},
+    difficulte: {}
 }
 
 // Alias rétro-compatible : certains modules utilisent encore global.db.jeux
@@ -264,9 +267,35 @@ const avecDelai = (promesse, ms, libelle) => Promise.race([
     new Promise((_, reject) => setTimeout(() => reject(new Error(`Délai dépassé (${libelle})`)), ms))
 ])
 
-global.getAIResponse = async (text, provider = 'auto', systemPrompt = null) => {
+global.getAIResponse = async (text, provider = 'auto', systemPrompt = null, historiqueChat = []) => {
     const nettoyer = (k) => (typeof k === 'string') ? k.trim() : ''
     const sys = systemPrompt || PROMPT_SYSTEME_DEFAUT
+
+    // ── Mémoire de conversation ──
+    // `historiqueChat` = derniers échanges [{role:'user'|'bot', contenu}] du
+    // chat. L'IA revoit donc le fil de la discussion et garde le contexte.
+    const entrees = Array.isArray(historiqueChat) ? historiqueChat.slice(-20) : []
+    const messagesIA = [
+        { role: 'system', content: sys },
+        ...entrees.map(e => ({ role: e.role === 'bot' ? 'assistant' : 'user', content: e.contenu })),
+        { role: 'user', content: text }
+    ]
+    // Gemini utilise {role:'user'|'model', parts:[...]} au lieu de messages
+    const contentsGemini = [
+        ...entrees.map(e => ({
+            role: e.role === 'bot' ? 'model' : 'user',
+            parts: [{ text: e.contenu }]
+        })),
+        { role: 'user', parts: [{ text }] }
+    ]
+    // Gemini refuse deux rôles identiques consécutifs : on fusionne
+    for (let i = contentsGemini.length - 2; i >= 0; i--) {
+        if (contentsGemini[i].role === contentsGemini[i + 1].role) {
+            contentsGemini[i].parts[0].text += '\n' + contentsGemini[i + 1].parts[0].text
+            contentsGemini.splice(i + 1, 1)
+        }
+    }
+    if (contentsGemini[0]?.role === 'model') contentsGemini.shift()
 
     // Budget global : toute la chaîne (tous fournisseurs confondus) ne doit
     // jamais dépasser 60 s — évite de faire attendre un chat ou un jeu.
@@ -320,10 +349,7 @@ global.getAIResponse = async (text, provider = 'auto', systemPrompt = null) => {
                 console.log(`[IA-OPENROUTER] Essai modèle: ${modele}`)
                 const completion = await avecDelai(client.chat.completions.create({
                     model: modele,
-                    messages: [
-                        { role: 'system', content: sys },
-                        { role: 'user', content: text }
-                    ],
+                    messages: messagesIA,
                     max_tokens: 1200
                 }), delaiPour(30000), 'openrouter')
                 const reponse = completion.choices?.[0]?.message?.content
@@ -361,7 +387,7 @@ global.getAIResponse = async (text, provider = 'auto', systemPrompt = null) => {
                         systemInstruction: sys
                     })
                     const resultat = await avecDelai(modele.generateContent({
-                        contents: [{ role: 'user', parts: [{ text }] }],
+                        contents: contentsGemini,
                         // Désactive les filtres qui font "refuser" l'IA sur des sujets anodins
                         safetySettings: [
                             { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
@@ -395,10 +421,7 @@ global.getAIResponse = async (text, provider = 'auto', systemPrompt = null) => {
                 try {
                     const completion = await avecDelai(client.chat.completions.create({
                         model: modeleId,
-                        messages: [
-                            { role: 'system', content: sys },
-                            { role: 'user', content: text }
-                        ],
+                        messages: messagesIA,
                         max_tokens: 1000
                     }), delaiPour(30000), 'wisdomgate')
                     const reponse = completion.choices?.[0]?.message?.content
@@ -444,6 +467,62 @@ global.getGeminiResponse = global.getAIResponse
 // Alias historiques utilisés par plusieurs commandes de jeux
 global.getDeepSeekResponse = (text, sys) => global.getAIResponse(text, 'auto', sys)
 global.getMetaAIResponse = (text, sys) => global.getAIResponse(text, 'meta', sys)
+
+// ─────────────────────────────────────────────────────────
+// MÉMOIRE DE CONVERSATION (par chat)
+// L'IA revoit les derniers échanges du groupe/MP pour suivre
+// le fil de la discussion sans perdre le contexte.
+// ─────────────────────────────────────────────────────────
+const HISTORIQUE_MAX_PAR_CHAT = 20      // 20 derniers échanges retenus
+const HISTORIQUE_MAX_CARACTES = 1200    // tronque un échange trop long
+const HISTORIQUE_MAX_CHATS = 300        // nombre de chats mémorisés (anti-gonflement)
+
+global.getHistorique = (chatId) => {
+    if (!global.db.historique) global.db.historique = {}
+    if (!global.db.historique[chatId]) global.db.historique[chatId] = []
+    return global.db.historique[chatId]
+}
+
+global.ajouterHistorique = (chatId, role, texte) => {
+    if (!texte) return
+    const h = global.getHistorique(chatId)
+    h.push({
+        role,
+        contenu: String(texte).slice(0, HISTORIQUE_MAX_CARACTES),
+        ts: Date.now()
+    })
+    // On garde seulement les N derniers échanges
+    while (h.length > HISTORIQUE_MAX_PAR_CHAT) h.shift()
+
+    // Anti-gonflement : on ne conserve que les chats les plus récents
+    const chats = Object.keys(global.db.historique)
+    if (chats.length > HISTORIQUE_MAX_CHATS) {
+        chats
+            .sort((a, b) => {
+                const da = global.db.historique[a].slice(-1)[0]?.ts || 0
+                const db = global.db.historique[b].slice(-1)[0]?.ts || 0
+                return da - db
+            })
+            .slice(0, chats.length - HISTORIQUE_MAX_CHATS)
+            .forEach(vieux => delete global.db.historique[vieux])
+    }
+}
+
+global.effacerHistorique = (chatId) => {
+    if (global.db.historique) delete global.db.historique[chatId]
+}
+
+// Construit le tableau `messages` avec l'historique pour les API compatibles OpenAI
+global.construireMessages = (chatId, texteUtilisateur, systemPrompt) => {
+    const messages = [{ role: 'system', content: systemPrompt }]
+    const h = global.getHistorique(chatId)
+    // On convertit au format attendu par les fournisseurs
+    for (const e of h) {
+        messages.push({ role: e.role === 'bot' ? 'assistant' : 'user', content: e.contenu })
+    }
+    messages.push({ role: 'user', content: texteUtilisateur })
+    return messages
+}
 
 // ─────────────────────────────────────────────────────────
 // PLANIFICATEUR OUVERTURE/FERMETURE DES GROUPES
@@ -716,6 +795,9 @@ async function startBot() {
                 }
                 if (Array.isArray(data.mods)) global.db.mods = data.mods
                 if (data.groups && typeof data.groups === 'object') global.db.groups = data.groups
+                // Mémoire IA + niveaux de difficulté : restaurés tels quels
+                if (data.historique && typeof data.historique === 'object') global.db.historique = data.historique
+                if (data.difficulte && typeof data.difficulte === 'object') global.db.difficulte = data.difficulte
                 // Les jeux en cours sont éphémères : on ne les restaure JAMAIS,
                 // sinon une partie figée d'un ancien démarrage reste collée au chat.
                 delete data.games
@@ -736,7 +818,10 @@ async function startBot() {
             const donnees = {
                 settings: global.db.settings,
                 mods: global.db.mods,
-                groups: global.db.groups
+                groups: global.db.groups,
+                // Mémoire de conversation (tronquée) + niveaux de difficulté
+                historique: global.db.historique,
+                difficulte: global.db.difficulte
                 // games et msgStore volontairement non persistés
             }
             fs.writeFileSync(cheminDB, JSON.stringify(donnees, null, 2))

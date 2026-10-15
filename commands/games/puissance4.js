@@ -5,7 +5,8 @@ module.exports = {
     commands: ['p4', 'connect4', 'puissance4'],
     run: async (sock, m, args, { reply }) => {
         const from = m.key.remoteJid
-        if (global.db.games[from]) return reply('❌ Une partie est déjà en cours dans ce chat !')
+        const { partieEnCours } = require('../../lib/jeux')
+        if (partieEnCours(from)) return reply('❌ Une partie est déjà en cours dans ce chat !')
 
         const sender = sock.decodeJid(m.key.participant || m.key.remoteJid)
         let player2 = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
