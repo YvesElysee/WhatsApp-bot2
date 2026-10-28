@@ -287,9 +287,7 @@ global.getAIResponse = async (text, provider = 'auto', systemPrompt = null, hist
     const nettoyer = (k) => (typeof k === 'string') ? k.trim() : ''
     const sys = systemPrompt || PROMPT_SYSTEME_DEFAUT
 
-    // ── Mémoire de conversation ──
-    // `historiqueChat` = derniers échanges [{role:'user'|'bot', contenu}] du
-    // chat. L'IA revoit donc le fil de la discussion et garde le contexte.
+    // ── Mémoire de conversation isolée par chat ──
     const entrees = Array.isArray(historiqueChat) ? historiqueChat.slice(-20) : []
     const messagesIA = [
         { role: 'system', content: sys },

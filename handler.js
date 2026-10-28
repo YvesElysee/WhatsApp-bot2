@@ -254,14 +254,10 @@ module.exports = async (sock, m, chatUpdate) => {
             // Listener de jeu actif (une seule partie par chat)
             const jeuActif = global.db.games?.[from]
 
-            // Mémoire IA : on retient TOUS les échanges naturels du chat
-            // (hors parties de jeu) pour que l'IA suive la conversation
-            // sans perdre le contexte, même sans être mentionnée.
-            // En groupe, on préfixe par le nom de l'auteur pour que l'IA
-            // sache "qui a dit quoi".
+            // Mémoire IA isolée par chat (groupe ou contact)
             const texteHistorique = estGroupe
                 ? `[${m.pushName || global.jidToNumber(expediteur)}] ${m.text}`
-                : m.text
+                : `[${m.pushName || global.jidToNumber(expediteur)}] ${m.text}`
             if (m.text && !m.key.fromMe && !jeuActif) {
                 global.ajouterHistorique(from, 'user', texteHistorique)
             }

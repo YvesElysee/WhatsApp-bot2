@@ -33,14 +33,16 @@ module.exports = {
         await reply(`${emoji} *Réflexion...*`)
 
         try {
-            // Mémoire : l'IA relit les derniers échanges de ce chat
+            // Mémoire isolée par chat (groupe/contact)
             const from = m.key.remoteJid
             const historique = global.getHistorique(from)
-            const resultat = await getAIResponse(text, fournisseur, null, historique)
+            const estGroupe2 = from.endsWith('@g.us')
+            const texteHist = estGroupe2 ? `[${m.pushName || global.jidToNumber(m.sender)}] ${text}` : `[${m.pushName || global.jidToNumber(m.sender)}] ${text}`
+            const resultat = await getAIResponse(texteHist, fournisseur, null, historique)
 
             // On retient l'échange pour la suite de la discussion
             if (resultat.out) {
-                global.ajouterHistorique(from, 'user', text)
+                global.ajouterHistorique(from, 'user', texteHist)
                 global.ajouterHistorique(from, 'bot', resultat.out)
             }
 
