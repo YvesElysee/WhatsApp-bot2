@@ -289,27 +289,37 @@ module.exports = async (sock, m, chatUpdate) => {
                 })
             }
 
-            // Chatbot : répond quand le bot est mentionné
+            // Chatbot / Réponse à un message de l'IA
             const candidatsBot = [sock.user?.id, sock.user?.lid].filter(Boolean)
             const estMentionne = (m.mentionedJid || []).some(j => candidatsBot.some(c => global.sameJid(j, c)))
             const estAppeleParNom = !estMentionne && !!sock.user?.name && typeof m.text === 'string' && m.text.startsWith(sock.user.name)
-            if (global.db.settings.chatbot && (estMentionne || estAppeleParNom) && !m.key.fromMe) {
-                // L'IA publique respecte le réglage "IA propriétaire uniquement"
+            let doitRepondreIA = (estMentionne || estAppeleParNom)
+            // Si l'utilisateur répond à un message envoyé par l'IA -> répondre directement (sans .ai)
+            if (!doitRepondreIA && estGroupe && m.quoted?.key?.id) {
+                try {
+                    const aiCtx = require('./lib/ai_context')
+                    if (aiCtx.isReplyToAI(from, m.quoted.key.id)) {
+                        doitRepondreIA = true
+                    }
+                } catch (e) {}
+            }
+            if (doitRepondreIA && !m.key.fromMe) {
                 if (global.db.settings.aiOnly && !estProprietaire) {
                     await sock.sendMessage(from, {
                         text: '🔒 L\'IA est actuellement réservée au propriétaire du bot.'
                     }, { quoted: m })
                 } else {
-                    if (estGroupe && global.db.iaOnlyGroups?.[from]) {
-                        // dans ce groupe seul l'IA via mention autorisée
-                    }
                     const hist = global.getHistorique(from)
                     const dernier = hist[hist.length - 1]
                     const base = dernier && dernier.contenu === texteHistorique ? hist.slice(0, -1) : hist
                     const reponse = await global.getAIResponse(m.text, 'auto', null, base)
                     if (reponse?.out) {
                         global.ajouterHistorique(from, 'bot', reponse.out)
-                        await sock.sendMessage(from, { text: reponse.out }, { quoted: m })
+                        const sent = await sock.sendMessage(from, { text: reponse.out }, { quoted: m })
+                        try {
+                            const aiCtx = require('./lib/ai_context')
+                            if (sent?.key?.id) aiCtx.addAIReply(from, sent.key.id)
+                        } catch (e) {}
                     }
                 }
             }
