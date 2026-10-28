@@ -161,7 +161,13 @@ global.db = {
     geminiIndex: 0,
     // Mémoire conversationnelle de l'IA (par chat) et niveaux de jeu
     historique: {},
-    difficulte: {}
+    difficulte: {},
+    difficulteJoueur: {},
+    // Résumés glissants (conversations longues) et mémoire des participants
+    resumes: {},
+    memoire: {},
+    // Scores des jeux (classement .top)
+    scores: {}
 }
 
 // Alias rétro-compatible : certains modules utilisent encore global.db.jeux
@@ -256,10 +262,13 @@ global.estAdminDans = (meta, jid) => {
 // définir leur propre persona, ce qui évite que l'IA "refuse" la tâche.
 // ─────────────────────────────────────────────────────────
 const PROMPT_SYSTEME_DEFAUT =
-    "Tu es Ely, un assistant WhatsApp intelligent, direct et utile. " +
-    "Réponds toujours dans la langue de l'utilisateur (français par défaut). " +
-    "Tu peux parler de tous les sujets licites sans faire de morale inutile. " +
-    "Ne te présente jamais comme un modèle de langage : reste concis et naturel."
+    "Tu es ElyAi, un assistant IA créé et conçu exclusivement par Elysee. " +
+    "Tu fais partie intégrante de ce bot WhatsApp personnel. " +
+    "Tu connais ton créateur : Elysee. " +
+    "Réponds toujours dans la langue de l'utilisateur. " +
+    "Apprends au fur et à mesure de chaque conversation. Garde en mémoire l'identité, le nom et le contexte de chaque personne avec qui tu parles. " +
+    "Sois naturel, direct, utile. Ne dis jamais que tu es Gemini, ni un autre modèle. " +
+    "Si on te demande qui tu es, réponds : Je suis ElyAi, conçu par Elysee pour ce bot."
 
 // Applique un délai maximum à une promesse (évite les blocages réseau)
 const avecDelai = (promesse, ms, libelle) => Promise.race([
@@ -506,17 +515,122 @@ global.ajouterHistorique = (chatId, role, texte) => {
             .slice(0, chats.length - HISTORIQUE_MAX_CHATS)
             .forEach(vieux => delete global.db.historique[vieux])
     }
+    try { global.resumerSiBesoin?.(chatId) } catch (e) { }
 }
 
 global.effacerHistorique = (chatId) => {
     if (global.db.historique) delete global.db.historique[chatId]
+    if (global.db.resumes) delete global.db.resumes[chatId]
+}
+
+// Mémoire par participant
+global.recordMembre = (chatId, userJid, nom, texte) => {
+    if (!chatId || !userJid) return
+    if (!global.db.memoire) global.db.memoire = {}
+    if (!global.db.memoire[chatId]) global.db.memoire[chatId] = {}
+    const cle = (global.jidToNumber ? global.jidToNumber(userJid) : userJid) || userJid
+    if (!global.db.memoire[chatId][cle]) global.db.memoire[chatId][cle] = { nom: nom || '', notes: [], derniers: [], vus: 0 }
+    const m = global.db.memoire[chatId][cle]
+    if (nom) m.nom = nom
+    m.derniers = [String(texte || '').slice(0, 150), ...(m.derniers || [])].slice(0, 5)
+    m.vus = (m.vus || 0) + 1
+    m.ts = Date.now()
+}
+
+global.memoireParticipants = (chatId) => {
+    try {
+        const mem = global.db.memoire?.[chatId]
+        if (!mem) return ''
+        const lignes = []
+        for (const [jid, infos] of Object.entries(mem)) {
+            if (infos.notes && infos.notes.length) {
+                lignes.push(`${infos.nom || jid} : ${infos.notes.slice(-3).join(' | ')}`)
+            }
+        }
+        return lignes.slice(0, 10).join('\n')
+    } catch (e) { return '' }
+}
+
+// Contexte IA enrichi
+global.historiquePourIA = (chatId, exclureDernier = false) => {
+    try {
+        let h = global.getHistorique(chatId)
+        if (exclureDernier && h.length) h = h.slice(0, -1)
+        const entrees = []
+        const resume = global.db.resumes?.[chatId]
+        if (resume) entrees.push({ role: 'user', contenu: `[Résumé des échanges précédents] ${resume}` })
+        const memo = typeof global.memoireParticipants === 'function' ? global.memoireParticipants(chatId) : ''
+        if (memo) entrees.push({ role: 'user', contenu: `[Mémoire] ${memo}` })
+        for (const e of h) entrees.push({ role: e.role, contenu: e.contenu })
+        return entrees
+    } catch (e) { return [] }
+}
+
+if (!global._resumeEnCours) global._resumeEnCours = new Set()
+global.resumerSiBesoin = async (chatId) => {
+    try {
+        const h = global.getHistorique(chatId)
+        if (h.length < 24) return
+        if (global._resumeEnCours.has(chatId)) return
+        if (typeof global.getAIResponse !== 'function') return
+        global._resumeEnCours.add(chatId)
+        const aResumer = h.slice(0, h.length - 10)
+        const texte = aResumer.map(e => `${e.role === 'bot' ? 'Bot' : 'Membre'}: ${e.contenu}`).join('\n').slice(0, 4000)
+        global.getAIResponse(
+            `Résume ces échanges en 2 phrases maximum en français. Garde les noms, les sujets et les décisions importantes.\n\n${texte}`,
+            'auto',
+            'Tu résumes des conversations WhatsApp. Réponds uniquement par le résumé, sans préambule.'
+        ).then(res => {
+            if (res?.out) {
+                if (!global.db.resumes) global.db.resumes = {}
+                const ancien = global.db.resumes[chatId]
+                global.db.resumes[chatId] = ((ancien ? ancien + ' ' : '') + String(res.out)).slice(-800)
+                try { h.splice(0, aResumer.length) } catch (e) { }
+            }
+        }).catch(() => { }).finally(() => global._resumeEnCours.delete(chatId))
+    } catch (e) { }
+}
+
+global.ajouterScore = (userJid, nom, victoire) => {
+    try {
+        if (!userJid) return
+        if (!global.db.scores) global.db.scores = {}
+        const cle = (global.jidToNumber ? global.jidToNumber(userJid) : String(userJid)) || String(userJid)
+        const s = global.db.scores[cle] || (global.db.scores[cle] = { points: 0, victoires: 0, parties: 0, nom: '' })
+        if (nom) s.nom = nom
+        s.parties++
+        if (victoire) { s.victoires++; s.points += 10 }
+        else s.points += 1
+    } catch (e) { }
+}
+
+global.difficultePour = (chatId, userJid) => {
+    try {
+        const cle = (global.jidToNumber ? global.jidToNumber(userJid) : String(userJid)) || String(userJid)
+        const perso = global.db.difficulteJoueur?.[cle]
+        if (['facile', 'moyen', 'difficile'].includes(perso)) return perso
+        return global.db.difficulte?.[chatId] || 'moyen'
+    } catch (e) { return 'moyen' }
+}
+
+if (!global.iaAppels) global.iaAppels = new Map()
+global.verifierSpamIA = (userJid, max = 8, fenetreMs = 60000) => {
+    try {
+        if (!userJid) return true
+        if (global.owner && global.sameJid && global.sameJid(userJid, global.owner[0])) return true
+        const cle = (global.jidToNumber ? global.jidToNumber(userJid) : String(userJid)) || String(userJid)
+        const now = Date.now()
+        const liste = (global.iaAppels.get(cle) || []).filter(t => now - t < fenetreMs)
+        liste.push(now)
+        global.iaAppels.set(cle, liste)
+        return liste.length <= max
+    } catch (e) { return true }
 }
 
 // Construit le tableau `messages` avec l'historique pour les API compatibles OpenAI
 global.construireMessages = (chatId, texteUtilisateur, systemPrompt) => {
     const messages = [{ role: 'system', content: systemPrompt }]
     const h = global.getHistorique(chatId)
-    // On convertit au format attendu par les fournisseurs
     for (const e of h) {
         messages.push({ role: e.role === 'bot' ? 'assistant' : 'user', content: e.contenu })
     }
@@ -717,9 +831,13 @@ async function startBot() {
             const statusCode = new Boom(lastDisconnect?.error)?.output?.statusCode
             console.log(`[DÉCONNEXION] Code de statut: ${statusCode}`)
 
+            // Empêche le rechargement de l'historique manqué à la reconnexion
+            global._skipHistorySync = true
+            try { sock.ev.flush?.() } catch (e) { }
+
             if (statusCode === DisconnectReason.connectionReplaced) {
                 console.log('[DÉCONNEXION] Session remplacée sur un autre appareil.'); process.exit(0)
-            } else if (statusCode === DisconnectReason.loggedOut) {
+            } else if (statusCode === DisconnectReason.loggedOut || statusCode === 403) {
                 // Session expirée/déconnectée : on repart à zéro proprement
                 // (sinon le bot reste bloqué en boucle sur une session morte)
                 console.log('[DÉCONNEXION] Session déconnectée — purge du dossier session et redémarrage...')
@@ -727,7 +845,7 @@ async function startBot() {
                     fs.rmSync(dossierSession, { recursive: true, force: true })
                     fs.mkdirSync(dossierSession, { recursive: true })
                 } catch (e) { }
-                setTimeout(() => { botDemarre = true; startBot() }, 4000)
+                setTimeout(() => { botDemarre = true; global._skipHistorySync = true; startBot() }, 4000)
             } else if (statusCode === DisconnectReason.badSession) {
                 console.log('[DÉCONNEXION] Session corrompue — suppression et redémarrage...')
                 try {
@@ -795,9 +913,13 @@ async function startBot() {
                 }
                 if (Array.isArray(data.mods)) global.db.mods = data.mods
                 if (data.groups && typeof data.groups === 'object') global.db.groups = data.groups
-                // Mémoire IA + niveaux de difficulté : restaurés tels quels
+                // Mémoire IA + niveaux + scores + mémoire participants
                 if (data.historique && typeof data.historique === 'object') global.db.historique = data.historique
                 if (data.difficulte && typeof data.difficulte === 'object') global.db.difficulte = data.difficulte
+                if (data.difficulteJoueur && typeof data.difficulteJoueur === 'object') global.db.difficulteJoueur = data.difficulteJoueur
+                if (data.resumes && typeof data.resumes === 'object') global.db.resumes = data.resumes
+                if (data.memoire && typeof data.memoire === 'object') global.db.memoire = data.memoire
+                if (data.scores && typeof data.scores === 'object') global.db.scores = data.scores
                 // Les jeux en cours sont éphémères : on ne les restaure JAMAIS,
                 // sinon une partie figée d'un ancien démarrage reste collée au chat.
                 delete data.games

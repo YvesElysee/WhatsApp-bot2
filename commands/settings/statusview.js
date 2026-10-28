@@ -9,10 +9,10 @@ module.exports = {
 
         if (args[0] === 'on') {
             global.db.settings.statusView = true
-            reply('👀 *Auto-View des statuts activé*.\nLe bot marquera désormais les statuts comme vus automatiquement.')
+            // silencieux
         } else if (args[0] === 'off') {
             global.db.settings.statusView = false
-            reply('👀 *Auto-View des statuts désactivé*.')
+            // silencieux
         } else {
             reply('Usage: .statusview [on/off]')
         }

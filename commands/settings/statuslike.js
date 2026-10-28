@@ -9,10 +9,10 @@ module.exports = {
 
         if (args[0] === 'on') {
             global.db.settings.statusLike = true
-            reply('❤️ *Auto-Like des statuts activé*.\nLe bot aimera désormais les statuts automatiquement.')
+            // silencieux
         } else if (args[0] === 'off') {
             global.db.settings.statusLike = false
-            reply('❤️ *Auto-Like des statuts désactivé*.')
+            // silencieux
         } else {
             reply('Usage: .statuslike [on/off]')
         }

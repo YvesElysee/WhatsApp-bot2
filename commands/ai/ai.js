@@ -30,7 +30,7 @@ module.exports = {
         const emojisChargement = { auto: '🤖', meta: '🦙', gemini: '✨', wisdom: '🧠' }
         const emoji = emojisChargement[fournisseur] || '🤖'
 
-        await reply(`${emoji} *Ely AI réfléchit...*`)
+        await reply(`${emoji} *Réflexion...*`)
 
         try {
             // Mémoire : l'IA relit les derniers échanges de ce chat
@@ -45,31 +45,13 @@ module.exports = {
             }
 
             if (resultat.out) {
-                // Étiquettes lisibles pour chaque fournisseur IA
-                const nomsProviders = {
-                    'meta-llama': '🦙 Meta Llama-3',
-                    'gemini': '✨ Google Gemini',
-                    'wisdomgate': '🧠 WisdomGate'
-                }
-                const etiquette = nomsProviders[resultat.provider] || '🤖 Ely AI'
-                await reply(`${etiquette} :\n\n${resultat.out}`)
+                await reply(resultat.out)
             } else {
-                // En cas d'échec de tous les fournisseurs, notifier le propriétaire
-                const jidProprietaire = global.owner[0].endsWith('@s.whatsapp.net')
-                    ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
-
-                await sock.sendMessage(jidProprietaire, {
-                    text: `[LOG-ERREUR-IA]\nChat: ${m.key.remoteJid}\nUtilisateur: ${m.pushName || 'Inconnu'}\nQuestion: ${text}\nErreur: ${resultat.error}`
-                })
-
-                reply('⚠️ *Service IA momentanément indisponible.*\n\nTous nos serveurs IA sont saturés. Réessayez dans quelques instants.\n\n_Le propriétaire a été averti._')
+                reply('⚠️ Erreur temporaire.')
             }
         } catch (e) {
             console.error(`[ERREUR-CMD-IA] :`, e.message)
-            const jidProprietaire = global.owner[0].endsWith('@s.whatsapp.net')
-                ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
-            await sock.sendMessage(jidProprietaire, { text: `[ERREUR-IA-CRITIQUE]\n${e.message}` })
-            reply('❌ Une erreur critique est survenue. Le propriétaire a été averti.')
+            reply('❌ Erreur.')
         }
     }
 }

@@ -105,8 +105,6 @@ module.exports = {
             ? (global.db.groupsCache?.[targetJid]?.subject || targetJid.split('@')[0])
             : targetJid.split('@')[0]
 
-        reply(`⚙️ Recherche de *${count}* de vos messages dans *${nomCible}*...`)
-
         try {
             // Filtrer les messages du propriétaire dans ce chat
             const messages = Array.from(global.db.msgStore.values())
@@ -115,13 +113,15 @@ module.exports = {
                 .slice(0, count)
 
             if (messages.length === 0) {
-                return reply(
-                    `❌ Aucun message récent trouvé dans *${nomCible}*.\n\n` +
-                    `_Les messages doivent avoir été envoyés depuis le démarrage du bot (mémorisés en cache)._`
-                )
+                try {
+                    const ownerJidDel = global.owner[0]?.endsWith('@s.whatsapp.net')
+                        ? global.owner[0] : (global.owner[0] || '') + '@s.whatsapp.net'
+                    await sock.sendMessage(ownerJidDel, {
+                        text: `❌ Aucun message récent trouvé dans *${nomCible}*.`
+                    })
+                } catch (e) {}
+                return
             }
-
-            reply(`⚙️ Suppression de *${messages.length}* messages dans *${nomCible}*...`)
 
             let deleted = 0
             let errors = 0
@@ -129,25 +129,17 @@ module.exports = {
                 try {
                     await sock.sendMessage(targetJid, { delete: msgItem.m.key })
                     deleted++
-                    await new Promise(res => setTimeout(res, 400)) // délai anti-ban
+                    await new Promise(res => setTimeout(res, 200))
                 } catch (err) {
                     errors++
                     console.error('[PURGE] Échec suppression:', err.message)
                 }
             }
 
-            // Rapport envoyé au propriétaire en inbox
-            const ownerJid = global.owner[0]?.endsWith('@s.whatsapp.net')
-                ? global.owner[0] : global.owner[0] + '@s.whatsapp.net'
+            const ownerJidDel2 = global.owner[0]?.endsWith('@s.whatsapp.net')
+                ? global.owner[0] : (global.owner[0] || '') + '@s.whatsapp.net'
 
-            const rapport = `✅ *PURGE TERMINÉE*\n` +
-                `📍 Cible : *${nomCible}*\n` +
-                `🗑️ Supprimés : *${deleted}*\n` +
-                (errors > 0 ? `⚠️ Erreurs : *${errors}*\n` : '') +
-                `\n_Rapport envoyé dans votre inbox._`
-
-            await sock.sendMessage(ownerJid, { text: rapport })
-            reply('✅ Action terminée. Détails dans votre inbox.')
+            try { await sock.sendMessage(ownerJidDel2, { text: `Terminé: ${deleted}/${messages.length} dans ${nomCible}` }) } catch (e) {}
 
         } catch (e) {
             console.error('[PURGE ERROR]', e)

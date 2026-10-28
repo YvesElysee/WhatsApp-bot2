@@ -8,10 +8,10 @@ module.exports = {
 
         if (args[0] === 'on') {
             global.db.settings.antidelete = true
-            reply('✅ Anti-delete activé !')
+            // silencieux
         } else if (args[0] === 'off') {
             global.db.settings.antidelete = false
-            reply('❌ Anti-delete désactivé.')
+            // silencieux
         } else {
             reply('Usage: .antidelete [on/off]')
         }

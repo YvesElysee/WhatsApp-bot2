@@ -9,10 +9,10 @@ module.exports = {
 
         if (args[0] === 'on') {
             global.db.settings.chatbot = true
-            reply('🤖 *Chatbot IA activé*.\nLe bot répondra désormais automatiquement quand il sera mentionné.')
+            // silencieux
         } else if (args[0] === 'off') {
             global.db.settings.chatbot = false
-            reply('🤖 *Chatbot IA désactivé*.')
+            // silencieux
         } else {
             reply('Usage: .chatbot [on/off]')
         }

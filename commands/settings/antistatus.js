@@ -9,10 +9,10 @@ module.exports = {
 
         if (args[0] === 'on') {
             global.db.settings.statusAntidelete = true
-            reply('🚨 *Anti-Delete Statut activé*.\nLe bot vous enverra les statuts supprimés par vos contacts.')
+            // silencieux
         } else if (args[0] === 'off') {
             global.db.settings.statusAntidelete = false
-            reply('🚨 *Anti-Delete Statut désactivé*.')
+            // silencieux
         } else {
             reply('Usage: .antistatus [on/off]')
         }

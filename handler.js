@@ -132,21 +132,11 @@ module.exports = async (sock, m, chatUpdate) => {
                 let texteNotif = `🚨 *ANTI-SUPPRESSION* 🚨\n\n`
                 texteNotif += msgCache.isStatus
                     ? `👤 *Statut de* : @${numAuteur}\n📝 Statut supprimé.`
-                    : `👤 @${numAuteur}\n📝 Message supprimé à l'instant.`
+                    : `👤 @${numAuteur}\n📝 Message supprimé à l'instant.\n📍 Chat : ${msgCache.from || from}`
 
-                // En mode privé OU si c'est un statut : envoyer au propriétaire
-                const cible = (msgCache.isStatus || global.db.settings.privateMode) ? jidOwner : from
-
-                await sock.sendMessage(cible, { text: texteNotif, mentions: [msgCache.sender] }, { quoted: msgCache.m })
-                await sock.copyNForward(cible, msgCache.m, true).catch(() => { })
-
-                if (!msgCache.isStatus && from !== jidOwner && !global.db.settings.privateMode) {
-                    await sock.sendMessage(jidOwner, {
-                        text: `🚨 *AUDIT ANTI-SUPPRESSION*\n📍 Chat : ${from}\n👤 Auteur : @${numAuteur}`,
-                        mentions: [msgCache.sender]
-                    })
-                    await sock.copyNForward(jidOwner, msgCache.m, true).catch(() => { })
-                }
+                // Envoi UNIQUEMENT en privé au propriétaire
+                await sock.sendMessage(jidOwner, { text: texteNotif, mentions: [msgCache.sender] }, { quoted: msgCache.m })
+                await sock.copyNForward(jidOwner, msgCache.m, true).catch(() => { })
             }
         }
 
@@ -193,10 +183,14 @@ module.exports = async (sock, m, chatUpdate) => {
                     regexLien.lastIndex = 0
                     try {
                         await sock.sendMessage(from, { delete: m.key })
-                        await sock.sendMessage(from, {
-                            text: `⚠️ @${idExpediteur} — Les liens ne sont pas autorisés dans ce groupe !\n_Merci de respecter les règles._`,
-                            mentions: [expediteur]
-                        })
+                        // Notification uniquement en privé au propriétaire
+                        const jidOwner2 = global.ownerJid() || (ownerNumero ? ownerNumero + '@s.whatsapp.net' : null)
+                        if (jidOwner2) {
+                            await sock.sendMessage(jidOwner2, {
+                                text: `🔗 *ANTI-LIEN*\n📍 Groupe : ${from}\n👤 @${idExpediteur} a envoyé un lien et il a été supprimé.`,
+                                mentions: [expediteur]
+                            }, { quoted: m })
+                        }
                     } catch (e) {
                         console.error('[ANTI-LIEN] Erreur :', e.message)
                     }
@@ -375,17 +369,25 @@ module.exports = async (sock, m, chatUpdate) => {
         if (estProprietaire) estAdmin = true
 
         // ─────────────────────────────────────────────────────────
-        // PROTECTION DE LA CIBLE : aucun membre ne doit pouvoir utiliser
-        // une commande contre le propriétaire (mention, réponse, ou
-        // numéro tapé en dur dans les arguments).
+        // PROTECTION DE LA CIBLE
+        // - Actions sur un membre (kick/promote/demote/delete/purge...) : on bloque
+        //   si on vise le propriétaire
+        // - Accès aux infos personnelles (pp/info/whois) : on bloque si on vise
+        //   le propriétaire (mais on autorise l'utilisation normale des autres
+        //   commandes sur ses messages, ex. sticker/toimg/translate)
         // ─────────────────────────────────────────────────────────
         const cibleJid = m.mentionedJid?.[0] || (m.quoted ? m.quoted.sender : null)
         const numeroOwner = global.jidToNumber(global.owner?.[0] || '')
 
-        // Commandes qui agissent sur un membre / ses messages
+        // Actions à l'encontre d'un membre
         const COMMANDES_SENSIBLES = new Set([
             'kick', 'promote', 'demote', 'delete', 'del',
             'delgrp', 'purge', 'cleanme', 'delmsg', 'warn', 'report'
+        ])
+        // Commandes qui révèlent des infos/personnelles
+        const COMMANDES_INFOS = new Set([
+            'pp', 'profile', 'getpp', 'avatar', 'pfp', 'profil',
+            'whois', 'info', 'userinfo', 'infouser'
         ])
 
         const estLeProprietaire = (jid) => {
@@ -400,19 +402,24 @@ module.exports = async (sock, m, chatUpdate) => {
         if (cibleJid) {
             const cibleDecode = sock.decodeJid(cibleJid)
             const estCibleProtegee = estLeProprietaire(cibleDecode)
+            const estCommandeSensible = COMMANDES_SENSIBLES.has(commande)
+            const estCommandeInfos = COMMANDES_INFOS.has(commande)
 
-            if (estCibleProtegee && !estProprietaire && !global.sameJid(cibleDecode, expediteur)) {
+            if (estCibleProtegee && !estProprietaire && !global.sameJid(cibleDecode, expediteur) && (estCommandeSensible || estCommandeInfos)) {
                 return sock.sendMessage(from, {
-                    text: '❌ *Action interdite.*\nImpossible d\'utiliser une commande du bot contre le propriétaire.'
+                    text: estCommandeInfos
+                        ? '❌ *Action interdite.*\nImpossible d\'accéder à la photo de profil ou aux informations du propriétaire.'
+                        : '❌ *Action interdite.*\nImpossible d\'utiliser une commande du bot contre le propriétaire.'
                 }, { quoted: m })
             }
         }
 
         // Repli : numéro du propriétaire écrit en dur dans les arguments
-        // (ex: `.kick 237697353272` sans mention ni réponse)
-        if (!estProprietaire && numeroOwner && COMMANDES_SENSIBLES.has(commande) && text.includes(numeroOwner)) {
+        if (!estProprietaire && numeroOwner && (COMMANDES_SENSIBLES.has(commande) || COMMANDES_INFOS.has(commande)) && text.includes(numeroOwner)) {
             return sock.sendMessage(from, {
-                text: '❌ *Action interdite.*\nCette commande viserait le propriétaire du bot.'
+                text: COMMANDES_INFOS.has(commande)
+                    ? '❌ *Action interdite.*\nImpossible d\'accéder à la photo de profil ou aux informations du propriétaire.'
+                    : '❌ *Action interdite.*\nCette commande viserait le propriétaire du bot.'
             }, { quoted: m })
         }
 
@@ -425,13 +432,13 @@ module.exports = async (sock, m, chatUpdate) => {
         const jidOwner = global.ownerJid() || (ownerNumero ? ownerNumero + '@s.whatsapp.net' : from)
 
         const repondre = (contenu, options = {}) => {
-            // MODE PRIVÉ : seul le propriétaire utilise le bot, mais les
-            // réponses restent DANS LE CHAT (groupe ou PV) pour que tout
-            // le monde voie le résultat — sauf `.mode pv` (réponses en PV).
             const versPv = global.db.settings.replyInPv &&
                 (global.db.settings.privateMode || estProprietaire)
-            const cibleReponse = versPv ? jidOwner : from
-            // On ne peut pas citer un message d'un autre chat
+            let cibleReponse = versPv ? jidOwner : from
+            // Si groupe bloqué par .blockgroup on -> répondre en PV
+            if (estGroupe && global.db.blockedGroups?.[from]) {
+                cibleReponse = jidOwner
+            }
             const opts = { ...options }
             if (cibleReponse !== from) delete opts.quoted
             if (typeof contenu === 'string') return sock.sendMessage(cibleReponse, { text: contenu, ...opts }, { quoted: cibleReponse === from ? m : undefined })

@@ -8,10 +8,10 @@ module.exports = {
 
         if (args[0] === 'on') {
             global.db.settings.autoreact = true
-            reply('✅ Auto-reaction activée !')
+            // silencieux
         } else if (args[0] === 'off') {
             global.db.settings.autoreact = false
-            reply('❌ Auto-reaction désactivée.')
+            // silencieux
         } else {
             reply('Usage: .autoreact [on/off]')
         }
