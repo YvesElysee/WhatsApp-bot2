@@ -300,17 +300,16 @@ module.exports = async (sock, m, chatUpdate) => {
                         text: '🔒 L\'IA est actuellement réservée au propriétaire du bot.'
                     }, { quoted: m })
                 } else {
-                    // La question courante vient d'être enregistrée plus haut :
-                    // on l'exclut de l'historique (elle est passée dans `text`).
+                    if (estGroupe && global.db.iaOnlyGroups?.[from]) {
+                        // dans ce groupe seul l'IA via mention autorisée
+                    }
                     const hist = global.getHistorique(from)
                     const dernier = hist[hist.length - 1]
                     const base = dernier && dernier.contenu === texteHistorique ? hist.slice(0, -1) : hist
                     const reponse = await global.getAIResponse(m.text, 'auto', null, base)
                     if (reponse?.out) {
                         global.ajouterHistorique(from, 'bot', reponse.out)
-                        await sock.sendMessage(from, { text: `🤖 *ELY-AI* :\n\n${reponse.out}` }, { quoted: m })
-                    } else if (reponse?.error) {
-                        await sock.sendMessage(from, { text: '⚠️ Le service IA est momentanément indisponible, réessayez plus tard.' }, { quoted: m })
+                        await sock.sendMessage(from, { text: reponse.out }, { quoted: m })
                     }
                 }
             }
@@ -421,6 +420,14 @@ module.exports = async (sock, m, chatUpdate) => {
                     ? '❌ *Action interdite.*\nImpossible d\'accéder à la photo de profil ou aux informations du propriétaire.'
                     : '❌ *Action interdite.*\nCette commande viserait le propriétaire du bot.'
             }, { quoted: m })
+        }
+
+        // Groupe en mode "seul IA" : bloquer toutes les commandes
+        if (estGroupe && global.db.iaOnlyGroups?.[from]) {
+            const commandesIA = new Set(['ai', 'ely', 'gpt', 'llama', 'meta'])
+            if (!commandesIA.has(commande)) {
+                return
+            }
         }
 
         console.log(`[EXEC] .${commande} par ${idExpediteur} | estAdmin=${estAdmin} | botAdmin=${botEstAdmin} | owner=${estProprietaire}`)
