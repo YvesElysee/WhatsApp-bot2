@@ -392,7 +392,7 @@ global.getAIResponse = async (text, provider = 'auto', systemPrompt = null, hist
             const index = (global.db.geminiIndex + i) % clefsGemini.length
             const cle = clefsGemini[index]
             const genAI = new GoogleGenerativeAI(cle)
-            const modeles = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro']
+            const modeles = ['gemini-2.5-flash-lite', 'gemini-1.5-flash', 'gemini-2.5-flash']
             for (const modeleId of modeles) {
                 if (budgetEpuise()) return null
                 try {
